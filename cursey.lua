@@ -1,14 +1,26 @@
 local curses = require "curses"
 local REGULAR, INVERTED, HIGHLIGHTED, RED
-local run_debugger
-local function callstack_offset()
+local run_debugger, cursey
+
+-- Return the callstack index of the code that actually caused an error and the max index
+local function callstack_range()
+    local min, max = 0, -1
     for i=1,999 do
-        if debug.getinfo(i,'f').func == run_debugger then return i+2 end
+        if debug.getinfo(i,'f').func == run_debugger then
+            min = i+2
+            break
+        end
     end
-    error("Couldn't find debugger")
+    for i=min,999 do
+        if debug.getinfo(i,'f').func == cursey then
+            max = i-3
+            break
+        end
+    end
+    return min, max
 end
 
-local pad_methods = {
+local Pad = setmetatable({
     select = function(self, i)
         if i == self.selected then return end
         if i then
@@ -47,17 +59,22 @@ local pad_methods = {
             curses.ACS_LLCORNER, curses.ACS_LRCORNER)
         self._pad:pnoutrefresh(self.offset,0,self.y,self.x,self.height+self.y,self.width+self.x)
     end,
-    add_line = function(self, line)
+    add_line = function(self, line, attr)
         self.height = self.height + 1
         self._pad:resize(self.height, self.width)
         table.insert(self.lines, line)
         local i = #self.lines
         local chstr = curses.new_chstr(self.width-2)
-        local attr = i % 2 == 0 and INVERTED or REGULAR
+        attr = attr or (i % 2 == 0 and INVERTED or REGULAR)
         self.chstrs[i] = chstr
         chstr:set_str(0, line, attr)
         chstr:set_str(#line+0, ' ', attr, chstr:len()-#line)
         self._pad:mvaddchstr(i-1+1,0+1,chstr)
+    end,
+    add_lines = function(self, lines)
+        for i,line in ipairs(lines) do
+            self:add_line(line)
+        end
     end,
     clear = function(self)
         self._pad:erase()
@@ -73,7 +90,19 @@ local pad_methods = {
     scroll = function(self, delta)
         self:select(self.selected + delta)
     end,
-}
+}, {
+    __call = function(Pad, y, x, height, width)
+        local pad = setmetatable({
+            x = x, y = y, width = width, height = height, offset = 0, selected = nil,
+            chstrs = {}, lines = {},
+        }, Pad)
+
+        pad._pad = curses.newpad(pad.height, pad.width)
+        pad._pad:scrollok(true)
+        return pad
+    end,
+})
+Pad.__index = Pad
 
 local function make_pad(y,x,lines)
     local width = 0
@@ -114,47 +143,48 @@ run_debugger = function(err_msg)
 
     local stack_names = {}
     local stack_locations = {}
-    local i = callstack_offset()
     local max_filename = 0
-    while true do
+    local stack_min, stack_max = callstack_range()
+    for i=stack_min,stack_max do
         local info = debug.getinfo(i)
         if not info then break end
         table.insert(stack_names, info.name or "???")
         local filename = info.short_src..":"..info.currentline
         table.insert(stack_locations, filename)
         max_filename = math.max(max_filename, #filename)
-        i = i + 1
     end
     local callstack = {}
     for i=1,#stack_names do
         callstack[i] = stack_locations[i]..(" "):rep(max_filename-#stack_locations[i]).." | "..stack_names[i].." "
     end
 
-    do
-        local err_win = curses.newwin(3,#err_msg+4,0,0)
-        local _, max_x = err_win:getmaxyx()
-        err_win:scrollok(true)
-        err_win:attrset(RED)
-        local chstr = curses.new_chstr(max_x)
-        chstr:set_str(0, ' '..err_msg, RED)
-        chstr:set_str(#err_msg+1, ' ', RED, max_x-#err_msg-3)
-        err_win:mvaddchstr(1,1,chstr)
-        err_win:border(curses.ACS_VLINE, curses.ACS_VLINE,
-            curses.ACS_HLINE, curses.ACS_HLINE,
-            curses.ACS_ULCORNER, curses.ACS_URCORNER,
-            curses.ACS_LLCORNER, curses.ACS_LRCORNER)
-        err_win:refresh()
+    local err_pad = Pad(0,0,2,SCREEN_W)
+    err_pad._pad:attrset(RED)
+    for line in err_msg:gmatch("[^\n]*") do
+        local buff = ""
+        for word in line:gmatch("%S%S*%s*") do
+            if #buff + #word > SCREEN_W - 4 then
+                err_pad:add_line(" "..buff, RED)
+                buff = word
+            else
+                buff = buff .. word
+            end
+        end
+        err_pad:add_line(" "..buff, RED)
     end
+    err_pad:refresh()
 
-    local stack_pad = make_pad(3,0,callstack)
-    local var_names = make_pad(3,stack_pad.x+stack_pad.width, {"<variable names>"})
-    local var_values = make_pad(3,var_names.x+var_names.width, {(" "):rep(SCREEN_W-(var_names.x+var_names.width+2))})
+    local stack_pad = Pad(err_pad.height,0,2,50)
+    stack_pad:add_lines(callstack)
+    local var_names = Pad(err_pad.height,stack_pad.x+stack_pad.width,2,25)
+    local var_values = Pad(err_pad.height,var_names.x+var_names.width,2,SCREEN_W-(var_names.x+var_names.width))
 
     function stack_pad:on_select(i)
         var_names:clear()
         var_values:clear()
+        local callstack_min, _ = callstack_range()
         for loc=1,999 do
-            local name, value = debug.getlocal(callstack_offset()+i-1, loc)
+            local name, value = debug.getlocal(callstack_min+i-1, loc)
             if value == nil then break end
             var_names:add_line(tostring(name))
             var_values:add_line(tostring(value))
@@ -186,7 +216,7 @@ run_debugger = function(err_msg)
     curses.endwin()
 end
 
-return function(fn, ...)
+cursey = function(fn, ...)
     -- To display Lua errors, we must close curses to return to
     -- normal terminal mode, and then write the error to stdout.
     local function err(err)
@@ -200,3 +230,5 @@ return function(fn, ...)
         xpcall(run_debugger, err, err_msg)
     end, ...)
 end
+
+return cursey
