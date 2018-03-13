@@ -264,12 +264,16 @@ main_loop = (err_msg, stack_index, var_index, value_index)->
                 filename,line_no = file\match("([^:]*):(.*)")
                 -- Launch system editor and then redraw everything
                 C.endwin!
+                err_pad, stack_pad, var_names, var_values = nil, nil, nil, nil
                 os.execute((os.getenv("EDITOR") or "nano").." +"..line_no.." "..filename)
                 initial_index = stack_pad.selected
                 return main_loop(err_msg,stack_pad.selected,var_index)
 
             when ('q')\byte!, ("Q")\byte!
                 break
+
+    err_pad, stack_pad, var_names, var_values = nil, nil, nil, nil
+    C.endwin!
 
 run_debugger = (err_msg)->
     export stdscr, SCREEN_H, SCREEN_W

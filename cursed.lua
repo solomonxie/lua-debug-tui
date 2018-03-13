@@ -344,6 +344,7 @@ main_loop = function(err_msg, stack_index, var_index, value_index)
       local file = stack_locations[stack_pad.selected]
       local filename, line_no = file:match("([^:]*):(.*)")
       C.endwin()
+      err_pad, stack_pad, var_names, var_values = nil, nil, nil, nil
       os.execute((os.getenv("EDITOR") or "nano") .. " +" .. line_no .. " " .. filename)
       local initial_index = stack_pad.selected
       return main_loop(err_msg, stack_pad.selected, var_index)
@@ -351,6 +352,8 @@ main_loop = function(err_msg, stack_index, var_index, value_index)
       break
     end
   end
+  err_pad, stack_pad, var_names, var_values = nil, nil, nil, nil
+  return C.endwin()
 end
 run_debugger = function(err_msg)
   stdscr = C.initscr()
