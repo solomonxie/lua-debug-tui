@@ -10,16 +10,15 @@ callstack_range = ->
     min, max = 0, -1
     for i=1,999 do
         info = debug.getinfo(i, 'f')
-        if not info then break
+        if not info
+            min = i-1
+            break
         if info.func == main_loop
             min = i+1
             break
     for i=min,999
         info = debug.getinfo(i, 'f')
-        if not info
-            max = i-3
-            break
-        if info.func == guard
+        if not info or info.func == guard
             max = i-3
             break
     return min, max
@@ -126,8 +125,11 @@ class Pad
 ok, to_lua = pcall -> require('moonscript.base').to_lua
 if not ok then to_lua = -> nil
 file_cache = setmetatable({}, {__index:(filename)=>
-    @[filename] = io.open(filename)\read("*a")
-    return @[filename]
+    file = io.open(filename)
+    if not file then return nil
+    contents = file\read("*a")
+    @[filename] = contents
+    return contents
 })
 line_tables = setmetatable({}, {__index:(filename)=>
     file = file_cache[filename]
@@ -151,9 +153,11 @@ main_loop = (err_msg, stack_index=1, var_index, value_index)->
         info = debug.getinfo(i)
         if not info then break
         table.insert(stack_names, info.name or "<unnamed function>")
-
-        line = if line_tables[info.short_src]
-            char = line_tables[info.short_src][info.currentline]
+        if not info.short_src
+            continue
+        line_table = line_tables[info.short_src]
+        line = if line_table
+            char = line_table[info.currentline]
             line_num = 1
             file = file_cache[info.short_src]
             for _ in file\sub(1,char)\gmatch("\n") do line_num += 1
