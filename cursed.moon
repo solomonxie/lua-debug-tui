@@ -42,7 +42,7 @@ class Pad
         @selected = nil
 
         @_height = #@lines + 2
-        @_width = 2
+        @_width = @width == AUTO and 2 or @width
         for x in *@lines do @_width = math.max(@_width, #x+2)
 
         if @height == AUTO
@@ -66,7 +66,7 @@ class Pad
         @refresh!
     
     select: (i)=>
-        if i == @selected or #@lines == 0 then return
+        if i == @selected or #@lines == 0 then return @selected
         if i != nil
             i = math.max(1, math.min(#@lines, i))
         if @selected
@@ -128,6 +128,8 @@ file_cache = setmetatable({}, {__index:(filename)=>
 })
 line_tables = setmetatable({}, {__index:(filename)=>
     file = file_cache[filename]
+    if not file
+        return nil
     ok, line_table = to_lua(file)
     if ok
         @[filename] = line_table
@@ -136,7 +138,7 @@ line_tables = setmetatable({}, {__index:(filename)=>
 
 err_pad, stack_pad, var_names, var_values = nil, nil, nil, nil
 
-main_loop = (err_msg, stack_index=1, var_index, value_index)->
+main_loop = (err_msg, stack_index, var_index, value_index)->
     export err_pad, stack_pad, var_names, var_values
     stack_names = {}
     stack_locations = {}
@@ -168,8 +170,8 @@ main_loop = (err_msg, stack_index=1, var_index, value_index)->
         err_pad = Pad(0,0,AUTO,SCREEN_W, err_msg_lines,setmetatable({}, __index:->RED), RED)
 
     if not stack_pad
-        stack_pad = Pad(err_pad.height,0,AUTO,AUTO, callstack, nil, BLUE)
-        stack_index = stack_pad\select(stack_index)
+        stack_pad = Pad(err_pad.height,0,AUTO,SCREEN_W, callstack, nil, BLUE)
+    stack_index = stack_pad\select(stack_index)
 
     if var_names
         var_names\erase!
@@ -196,7 +198,7 @@ main_loop = (err_msg, stack_index=1, var_index, value_index)->
         var_index = var_names\select(var_index)
 
     value_x = var_names.x+var_names.width
-    value_w = SCREEN_W-(value_x+1)
+    value_w = SCREEN_W-(value_x)
     if value_index
         var_values = Pad(var_y,value_x,AUTO,value_w,wrap_text(_var_values[var_index], value_w-2), nil, BLUE)
         value_index = var_values\select(value_index)
@@ -291,7 +293,7 @@ run_debugger = (err_msg)->
     stdscr\clear!
     stdscr\refresh!
 
-    return main_loop(err_msg)
+    return main_loop(err_msg, 1)
 
 
 guard = (fn, ...)->

@@ -56,7 +56,7 @@ do
   local _base_0 = {
     select = function(self, i)
       if i == self.selected or #self.lines == 0 then
-        return 
+        return self.selected
       end
       if i ~= nil then
         i = math.max(1, math.min(#self.lines, i))
@@ -124,7 +124,7 @@ do
       self.offset = 0
       self.selected = nil
       self._height = #self.lines + 2
-      self._width = 2
+      self._width = self.width == AUTO and 2 or self.width
       local _list_0 = self.lines
       for _index_0 = 1, #_list_0 do
         local x = _list_0[_index_0]
@@ -185,6 +185,9 @@ local file_cache = setmetatable({ }, {
 local line_tables = setmetatable({ }, {
   __index = function(self, filename)
     local file = file_cache[filename]
+    if not file then
+      return nil
+    end
     local line_table
     ok, line_table = to_lua(file)
     if ok then
@@ -195,9 +198,6 @@ local line_tables = setmetatable({ }, {
 })
 local err_pad, stack_pad, var_names, var_values = nil, nil, nil, nil
 main_loop = function(err_msg, stack_index, var_index, value_index)
-  if stack_index == nil then
-    stack_index = 1
-  end
   local stack_names = { }
   local stack_locations = { }
   local max_filename = 0
@@ -248,9 +248,9 @@ main_loop = function(err_msg, stack_index, var_index, value_index)
     }), RED)
   end
   if not stack_pad then
-    stack_pad = Pad(err_pad.height, 0, AUTO, AUTO, callstack, nil, BLUE)
-    stack_index = stack_pad:select(stack_index)
+    stack_pad = Pad(err_pad.height, 0, AUTO, SCREEN_W, callstack, nil, BLUE)
   end
+  stack_index = stack_pad:select(stack_index)
   if var_names then
     var_names:erase()
   end
@@ -279,7 +279,7 @@ main_loop = function(err_msg, stack_index, var_index, value_index)
     var_index = var_names:select(var_index)
   end
   local value_x = var_names.x + var_names.width
-  local value_w = SCREEN_W - (value_x + 1)
+  local value_w = SCREEN_W - (value_x)
   if value_index then
     var_values = Pad(var_y, value_x, AUTO, value_w, wrap_text(_var_values[var_index], value_w - 2), nil, BLUE)
     value_index = var_values:select(value_index)
@@ -369,7 +369,7 @@ run_debugger = function(err_msg)
   _, BLUE = C.init_pair(5, C.COLOR_BLUE, -1), C.color_pair(5) | C.A_BOLD
   stdscr:clear()
   stdscr:refresh()
-  return main_loop(err_msg)
+  return main_loop(err_msg, 1)
 end
 guard = function(fn, ...)
   local err_hand
