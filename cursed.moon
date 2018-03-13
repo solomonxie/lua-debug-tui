@@ -116,9 +116,6 @@ class Pad
         @offset = 0
         @refresh!
     
-    scroll: (delta)=>
-        @select(@selected and (@selected + delta) or 1)
-
 
 ok, to_lua = pcall -> require('moonscript.base').to_lua
 if not ok then to_lua = -> nil
@@ -137,12 +134,10 @@ line_tables = setmetatable({}, {__index:(filename)=>
         return line_table
 })
 
+err_pad, stack_pad, var_names, var_values = nil, nil, nil, nil
+
 main_loop = (err_msg, stack_index=1, var_index, value_index)->
-    SCREEN_H, SCREEN_W = stdscr\getmaxyx!
-
-    stdscr\clear!
-    stdscr\refresh!
-
+    export err_pad, stack_pad, var_names, var_values
     stack_names = {}
     stack_locations = {}
     max_filename = 0
@@ -168,11 +163,18 @@ main_loop = (err_msg, stack_index=1, var_index, value_index)->
     for i=1,#stack_names do
         callstack[i] = stack_locations[i]..(" ")\rep(max_filename-#stack_locations[i]).." | "..stack_names[i].." "
 
-    err_msg_lines = wrap_text(err_msg, SCREEN_W - 4)
-    err_pad = Pad(0,0,AUTO,SCREEN_W, err_msg_lines,setmetatable({}, __index:->RED), RED)
+    if not err_pad
+        err_msg_lines = wrap_text(err_msg, SCREEN_W - 4)
+        err_pad = Pad(0,0,AUTO,SCREEN_W, err_msg_lines,setmetatable({}, __index:->RED), RED)
 
-    stack_pad = Pad(err_pad.height,0,AUTO,AUTO, callstack, nil, BLUE)
-    stack_index = stack_pad\select(stack_index)
+    if not stack_pad
+        stack_pad = Pad(err_pad.height,0,AUTO,AUTO, callstack, nil, BLUE)
+        stack_index = stack_pad\select(stack_index)
+
+    if var_names
+        var_names\erase!
+    if var_values
+        var_values\erase!
 
     callstack_min, _ = callstack_range!
     _var_names, _var_values = {}, {}
@@ -187,17 +189,19 @@ main_loop = (err_msg, stack_index=1, var_index, value_index)->
         else
             table.insert(_var_values, repr(value))
     
-    var_names = Pad(err_pad.height,stack_pad.x+stack_pad.width,AUTO,AUTO,_var_names, nil, BLUE)
+    var_y = stack_pad.y + stack_pad.height
+    var_x = 0
+    var_names = Pad(var_y,var_x,AUTO,AUTO,_var_names, nil, BLUE)
     if var_index and #_var_names > 0
         var_index = var_names\select(var_index)
 
     value_x = var_names.x+var_names.width
     value_w = SCREEN_W-(value_x+1)
     if value_index
-        var_values = Pad(err_pad.height,value_x,AUTO,value_w,wrap_text(_var_values[var_index], value_w-2), nil, BLUE)
+        var_values = Pad(var_y,value_x,AUTO,value_w,wrap_text(_var_values[var_index], value_w-2), nil, BLUE)
         value_index = var_values\select(value_index)
     else
-        var_values = Pad(err_pad.height,value_x,AUTO,value_w,_var_values, nil, BLUE)
+        var_values = Pad(var_y,value_x,AUTO,value_w,_var_values, nil, BLUE)
 
     while true
         C.doupdate!
@@ -283,6 +287,9 @@ run_debugger = (err_msg)->
     _, HIGHLIGHTED = C.init_pair(3, C.COLOR_BLACK, C.COLOR_YELLOW), C.color_pair(3)
     _, RED = C.init_pair(4, C.COLOR_RED, -1), C.color_pair(4) | C.A_BOLD
     _, BLUE = C.init_pair(5, C.COLOR_BLUE, -1), C.color_pair(5) | C.A_BOLD
+
+    stdscr\clear!
+    stdscr\refresh!
 
     return main_loop(err_msg)
 

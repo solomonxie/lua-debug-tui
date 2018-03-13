@@ -109,9 +109,6 @@ do
       self.selected = nil
       self.offset = 0
       return self:refresh()
-    end,
-    scroll = function(self, delta)
-      return self:select(self.selected and (self.selected + delta) or 1)
     end
   }
   _base_0.__index = _base_0
@@ -196,13 +193,11 @@ local line_tables = setmetatable({ }, {
     end
   end
 })
+local err_pad, stack_pad, var_names, var_values = nil, nil, nil, nil
 main_loop = function(err_msg, stack_index, var_index, value_index)
   if stack_index == nil then
     stack_index = 1
   end
-  SCREEN_H, SCREEN_W = stdscr:getmaxyx()
-  stdscr:clear()
-  stdscr:refresh()
   local stack_names = { }
   local stack_locations = { }
   local max_filename = 0
@@ -244,14 +239,24 @@ main_loop = function(err_msg, stack_index, var_index, value_index)
   for i = 1, #stack_names do
     callstack[i] = stack_locations[i] .. (" "):rep(max_filename - #stack_locations[i]) .. " | " .. stack_names[i] .. " "
   end
-  local err_msg_lines = wrap_text(err_msg, SCREEN_W - 4)
-  local err_pad = Pad(0, 0, AUTO, SCREEN_W, err_msg_lines, setmetatable({ }, {
-    __index = function()
-      return RED
-    end
-  }), RED)
-  local stack_pad = Pad(err_pad.height, 0, AUTO, AUTO, callstack, nil, BLUE)
-  stack_index = stack_pad:select(stack_index)
+  if not err_pad then
+    local err_msg_lines = wrap_text(err_msg, SCREEN_W - 4)
+    err_pad = Pad(0, 0, AUTO, SCREEN_W, err_msg_lines, setmetatable({ }, {
+      __index = function()
+        return RED
+      end
+    }), RED)
+  end
+  if not stack_pad then
+    stack_pad = Pad(err_pad.height, 0, AUTO, AUTO, callstack, nil, BLUE)
+    stack_index = stack_pad:select(stack_index)
+  end
+  if var_names then
+    var_names:erase()
+  end
+  if var_values then
+    var_values:erase()
+  end
   local callstack_min, _ = callstack_range()
   local _var_names, _var_values = { }, { }
   for loc = 1, 999 do
@@ -267,17 +272,19 @@ main_loop = function(err_msg, stack_index, var_index, value_index)
       table.insert(_var_values, repr(value))
     end
   end
-  local var_names = Pad(err_pad.height, stack_pad.x + stack_pad.width, AUTO, AUTO, _var_names, nil, BLUE)
+  local var_y = stack_pad.y + stack_pad.height
+  local var_x = 0
+  var_names = Pad(var_y, var_x, AUTO, AUTO, _var_names, nil, BLUE)
   if var_index and #_var_names > 0 then
     var_index = var_names:select(var_index)
   end
   local value_x = var_names.x + var_names.width
   local value_w = SCREEN_W - (value_x + 1)
   if value_index then
-    local var_values = Pad(err_pad.height, value_x, AUTO, value_w, wrap_text(_var_values[var_index], value_w - 2), nil, BLUE)
+    var_values = Pad(var_y, value_x, AUTO, value_w, wrap_text(_var_values[var_index], value_w - 2), nil, BLUE)
     value_index = var_values:select(value_index)
   else
-    local var_values = Pad(err_pad.height, value_x, AUTO, value_w, _var_values, nil, BLUE)
+    var_values = Pad(var_y, value_x, AUTO, value_w, _var_values, nil, BLUE)
   end
   while true do
     C.doupdate()
@@ -360,6 +367,8 @@ run_debugger = function(err_msg)
   _, HIGHLIGHTED = C.init_pair(3, C.COLOR_BLACK, C.COLOR_YELLOW), C.color_pair(3)
   _, RED = C.init_pair(4, C.COLOR_RED, -1), C.color_pair(4) | C.A_BOLD
   _, BLUE = C.init_pair(5, C.COLOR_BLUE, -1), C.color_pair(5) | C.A_BOLD
+  stdscr:clear()
+  stdscr:refresh()
   return main_loop(err_msg)
 end
 guard = function(fn, ...)
