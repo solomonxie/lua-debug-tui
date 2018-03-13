@@ -23,17 +23,15 @@ callstack_range = ->
             break
     return min, max
 
+
 wrap_text = (text, width)->
     lines = {}
     for line in text\gmatch("[^\n]*")
-        buff = ""
-        for word in line\gmatch("%S%S*%s*")
-            if #buff + #word > width
-                table.insert(lines, " "..buff)
-                buff = word
-            else
-                buff = buff .. word
-        table.insert(lines, " "..buff)
+        while #line > width
+            table.insert(lines, line\sub(1,width))
+            line = line\sub(width+1,-1)
+        if #line > 0
+            table.insert(lines, line)
     return lines
 
 alternating_colors = setmetatable({}, {__index:(i)=> if i % 2 == 0 then INVERTED else REGULAR})
@@ -196,7 +194,7 @@ main_loop = (err_msg, stack_index=1, var_index, value_index)->
     value_x = var_names.x+var_names.width
     value_w = SCREEN_W-(value_x+1)
     if value_index
-        var_values = Pad(err_pad.height,value_x,AUTO,value_w,wrap_text(_var_values[var_index], value_w), nil, BLUE)
+        var_values = Pad(err_pad.height,value_x,AUTO,value_w,wrap_text(_var_values[var_index], value_w-2), nil, BLUE)
         value_index = var_values\select(value_index)
     else
         var_values = Pad(err_pad.height,value_x,AUTO,value_w,_var_values, nil, BLUE)
