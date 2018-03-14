@@ -1,7 +1,7 @@
 C = require "curses"
 repr = require 'repr'
 COLORS = {}
-local run_debugger, guard, stdscr, main_loop
+local run_debugger, guard, stdscr
 AUTO = -1
 log = io.open("output.log", "w")
 
@@ -13,7 +13,7 @@ callstack_range = ->
         if not info
             min = i-1
             break
-        if info.func == main_loop
+        if info.func == run_debugger
             min = i+1
             break
     for i=min,999
@@ -71,6 +71,7 @@ class Pad
         @refresh!
     
     set_active: (active)=>
+        return if active == @active
         @active = active
         @_pad\attrset(active and @colors.active_frame or @colors.inactive_frame)
     
@@ -101,6 +102,11 @@ class Pad
         @refresh!
         if @on_select then @on_select(@selected)
         return @selected
+    
+    scroll: (delta)=>
+        if @selected == nil
+            return @select 1
+        @select(@selected + delta)
     
     refresh: =>
         @_pad\border(C.ACS_VLINE, C.ACS_VLINE,
@@ -148,188 +154,6 @@ line_tables = setmetatable({}, {__index:(filename)=>
         return line_table
 })
 
-err_pad, stack_pad, src_pad, var_names, var_values = nil, nil, nil, nil, nil
-
-main_loop = (err_msg, stack_index, var_index, value_index)->
-    export err_pad, stack_pad, var_names, var_values
-    stack_names = {}
-    stack_locations = {}
-    max_filename = 0
-    stack_min, stack_max = callstack_range!
-    for i=stack_min,stack_max
-        info = debug.getinfo(i)
-        if not info then break
-        table.insert(stack_names, info.name or "<unnamed function>")
-        if not info.short_src
-            continue
-        line_table = line_tables[info.short_src]
-        line = if line_table
-            char = line_table[info.currentline]
-            line_num = 1
-            file = file_cache[info.short_src]
-            for _ in file\sub(1,char)\gmatch("\n") do line_num += 1
-            "#{info.short_src}:#{line_num}"
-        else
-            info.short_src..":"..info.currentline
-        table.insert(stack_locations, line)
-        max_filename = math.max(max_filename, #line)
-    callstack = {}
-    for i=1,#stack_names do
-        callstack[i] = stack_locations[i]..(" ")\rep(max_filename-#stack_locations[i]).." | "..stack_names[i].." "
-
-    if not err_pad
-        err_msg_lines = wrap_text(err_msg, SCREEN_W - 4)
-        for i,line in ipairs(err_msg_lines)
-            err_msg_lines[i] = (" ")\rep(math.floor((SCREEN_W-2-#line)/2))..line
-        err_pad = Pad(0,0,AUTO,SCREEN_W, err_msg_lines, "Error Message", {
-            even_row: COLORS.RED | C.A_BOLD, odd_row: COLORS.RED | C.A_BOLD,
-            inactive_frame: COLORS.RED | C.A_DIM
-        })
-
-    if not stack_pad
-        stack_pad = Pad(err_pad.height,0,math.max(#callstack+2, 20),AUTO, callstack, "Callstack")
-        stack_pad.label = "Callstack"
-        stack_pad\set_active(true)
-        stack_pad\refresh!
-
-        stack_pad.on_select = (stack_index)=>
-            filename, line_no = stack_pad.lines[stack_index]\match("([^:]*):(%d*).*")
-            line_no = tonumber(line_no)
-            file = file_cache[filename]
-            src_lines = {}
-            selected = nil
-            i = 0
-            for line in file\gmatch("[^\n]*")
-                i += 1
-                if i < line_no-(@height-2)/2
-                    continue
-                table.insert src_lines, line
-                if i == line_no
-                    selected = #src_lines
-                if #src_lines >= @height-2
-                    break
-            export src_pad
-            if src_pad
-                src_pad\erase!
-            src_pad = Pad(err_pad.height,stack_pad.x+stack_pad.width,
-                stack_pad.height,SCREEN_W-stack_pad.x-stack_pad.width-0, src_lines, "Source Code", {
-                    highlight: COLORS.RED_BG,
-                    inactive_frame: COLORS.GREEN | C.A_BOLD,
-                })
-            src_pad\select(selected)
-
-    stack_index = stack_pad\select(stack_index)
-
-    if var_names
-        var_names\erase!
-    if var_values
-        var_values\erase!
-
-    callstack_min, _ = callstack_range!
-    _var_names, _var_values = {}, {}
-    for loc=1,999
-        name, value = debug.getlocal(callstack_min+stack_index-1, loc)
-        if value == nil then break
-        table.insert(_var_names, tostring(name))
-        if type(value) == 'function'
-            info = debug.getinfo(value, 'nS')
-            --var_values\add_line(("function: %s @ %s:%s")\format(info.name or '???', info.short_src, info.linedefined))
-            table.insert(_var_values, repr(info))
-        else
-            table.insert(_var_values, repr(value))
-    
-    var_y = stack_pad.y + stack_pad.height
-    var_x = 0
-    var_names = Pad(var_y,var_x,math.min(2+#_var_names, SCREEN_H-err_pad.height-stack_pad.height),AUTO,_var_names,"Vars")
-    if var_index and #_var_names > 0
-        var_names\set_active(value_index == nil)
-        stack_pad\set_active(false)
-        stack_pad\refresh!
-        var_index = var_names\select(var_index)
-    else
-        stack_pad\set_active(true)
-        stack_pad\refresh!
-
-    value_x = var_names.x+var_names.width
-    value_w = SCREEN_W-(value_x)
-    if value_index
-        var_values = Pad(var_y,value_x,var_names.height,value_w,wrap_text(_var_values[var_index], value_w-2), "Values")
-        var_values\set_active(true)
-        value_index = var_values\select(value_index)
-    else
-        var_values = Pad(var_y,value_x,var_names.height,value_w,_var_values, "Values")
-        var_values\set_active(false)
-
-    while true
-        C.doupdate!
-        c = stdscr\getch!
-        switch c
-            when C.KEY_DOWN, C.KEY_SF, ("j")\byte!
-                if value_index
-                    value_index += 1
-                elseif var_index
-                    var_index += 1
-                else
-                    stack_index += 1
-                return main_loop(err_msg,stack_index,var_index,value_index)
-
-            when C.KEY_UP, C.KEY_SR, ("k")\byte!
-                if value_index
-                    value_index -= 1
-                elseif var_index
-                    var_index -= 1
-                else
-                    stack_index -= 1
-                return main_loop(err_msg,stack_index,var_index,value_index)
-
-            when ('J')\byte!
-                if value_index
-                    value_index += 10
-                elseif var_index
-                    var_index += 10
-                else
-                    stack_index += 10
-                return main_loop(err_msg,stack_index,var_index,value_index)
-
-            when ('K')\byte!
-                if value_index
-                    value_index -= 10
-                elseif var_index
-                    var_index -= 10
-                else
-                    stack_index -= 10
-                return main_loop(err_msg,stack_index,var_index,value_index)
-
-            when C.KEY_RIGHT, ("l")\byte!
-                if var_index == nil
-                    var_index = 1
-                elseif value_index == nil
-                    value_index = 1
-                return main_loop(err_msg,stack_index,var_index,value_index)
-
-            when C.KEY_LEFT, ("h")\byte!
-                if value_index
-                    value_index = nil
-                elseif var_index
-                    var_index = nil
-                return main_loop(err_msg,stack_index,var_index,value_index)
-
-            when ('o')\byte!
-                file = stack_locations[stack_pad.selected]
-                filename,line_no = file\match("([^:]*):(.*)")
-                -- Launch system editor and then redraw everything
-                err_pad, stack_pad, src_pad, var_names, var_values = nil, nil, nil, nil, nil
-                C.endwin!
-                os.execute((os.getenv("EDITOR") or "nano").." +"..line_no.." "..filename)
-                initial_index = stack_pad.selected
-                return main_loop(err_msg,stack_pad.selected,var_index)
-
-            when ('q')\byte!, ("Q")\byte!
-                break
-
-    err_pad, stack_pad, src_pad, var_names, var_values = nil, nil, nil, nil, nil
-    C.endwin!
-
 run_debugger = (err_msg)->
     export stdscr, SCREEN_H, SCREEN_W
     stdscr = C.initscr!
@@ -365,7 +189,163 @@ run_debugger = (err_msg)->
     stdscr\clear!
     stdscr\refresh!
 
-    return main_loop(err_msg, 1)
+    pads = {}
+
+    do -- Err pad
+        err_msg_lines = wrap_text(err_msg, SCREEN_W - 4)
+        for i,line in ipairs(err_msg_lines)
+            err_msg_lines[i] = (" ")\rep(math.floor((SCREEN_W-2-#line)/2))..line
+        pads.err = Pad(0,0,AUTO,SCREEN_W, err_msg_lines, "Error Message", {
+            even_row: COLORS.RED | C.A_BOLD, odd_row: COLORS.RED | C.A_BOLD,
+            inactive_frame: COLORS.RED | C.A_DIM
+        })
+
+    do -- Stack pad
+        stack_names = {}
+        stack_locations = {}
+        max_filename = 0
+        stack_min, stack_max = callstack_range!
+        for i=stack_min,stack_max
+            info = debug.getinfo(i)
+            if not info then break
+            table.insert(stack_names, info.name or "<unnamed function>")
+            if not info.short_src
+                continue
+            line_table = line_tables[info.short_src]
+            line = if line_table
+                char = line_table[info.currentline]
+                line_num = 1
+                file = file_cache[info.short_src]
+                for _ in file\sub(1,char)\gmatch("\n") do line_num += 1
+                "#{info.short_src}:#{line_num}"
+            else
+                info.short_src..":"..info.currentline
+            table.insert(stack_locations, line)
+            max_filename = math.max(max_filename, #line)
+        callstack = {}
+        for i=1,#stack_names do
+            callstack[i] = stack_locations[i]..(" ")\rep(max_filename-#stack_locations[i]).." | "..stack_names[i].." "
+
+        pads.stack = Pad(pads.err.height,0,math.max(#callstack+2, 20),AUTO, callstack, "(C)allstack")
+        pads.stack\set_active(true)
+        pads.stack\refresh!
+    
+    show_src = (filename, line_no)->
+        file = file_cache[filename]
+        src_lines = {}
+        selected = nil
+        if file
+            i = 0
+            for line in file\gmatch("[^\n]*")
+                i += 1
+                if i < line_no-(pads.stack.height-2)/2
+                    continue
+                table.insert src_lines, line
+                if i == line_no
+                    selected = #src_lines
+                if #src_lines >= pads.stack.height-2
+                    break
+        else
+            table.insert(src_lines, "<no source code found>")
+
+        if pads.src
+            pads.src\erase!
+        pads.src = Pad(pads.err.height,pads.stack.x+pads.stack.width,
+            pads.stack.height,SCREEN_W-pads.stack.x-pads.stack.width-0, src_lines, "(S)ource Code", {
+                highlight: COLORS.RED_BG,
+                inactive_frame: COLORS.GREEN | C.A_BOLD,
+            })
+        pads.src\select(selected)
+    
+    show_vars = (stack_index)->
+        if pads.vars
+            pads.vars\erase!
+        if pads.values
+            pads.values\erase!
+        callstack_min, _ = callstack_range!
+        var_names, values = {}, {}
+        for loc=1,999
+            name, value = debug.getlocal(callstack_min+stack_index-1, loc)
+            if value == nil then break
+            table.insert(var_names, tostring(name))
+            if type(value) == 'function'
+                info = debug.getinfo(value, 'nS')
+                --values\add_line(("function: %s @ %s:%s")\format(info.name or '???', info.short_src, info.linedefined))
+                table.insert(values, repr(info))
+            else
+                table.insert(values, repr(value))
+        
+        var_y = pads.stack.y + pads.stack.height
+        var_x = 0
+        pads.vars = Pad(var_y,var_x,math.min(2+#var_names, SCREEN_H-pads.err.height-pads.stack.height),AUTO,var_names,"(V)ars")
+
+        pads.vars.on_select = (var_index)=>
+            value_x = pads.vars.x+pads.vars.width
+            value_w = SCREEN_W-(value_x)
+            -- Show single value:
+            if var_index
+                pads.values = Pad(var_y,value_x,pads.vars.height,value_w,wrap_text(values[var_index], value_w-2), "Values")
+            else
+                pads.values = Pad(var_y,value_x,pads.vars.height,value_w,values, "Values")
+
+        pads.vars\select(1)
+
+    pads.stack.on_select = (stack_index)=>
+        filename, line_no = pads.stack.lines[stack_index]\match("([^:]*):(%d*).*")
+        line_no = tonumber(line_no)
+        show_src(filename, line_no)
+        show_vars(stack_index)
+
+    pads.stack\select(1)
+    pads.stack\set_active(true)
+    selected_pad = pads.stack
+
+    select_pad = (pad)->
+        if selected_pad != pad
+            selected_pad\set_active(false)
+            selected_pad\refresh!
+            selected_pad = pad
+            selected_pad\set_active(true)
+            selected_pad\refresh!
+
+    while true
+        C.doupdate!
+        c = stdscr\getch!
+        switch c
+            when C.KEY_DOWN, C.KEY_SF, ("j")\byte!
+                selected_pad\scroll(1)
+
+            when C.KEY_UP, C.KEY_SR, ("k")\byte!
+                selected_pad\scroll(-1)
+
+            when ('J')\byte!
+                selected_pad\scroll(10)
+
+            when ('K')\byte!
+                selected_pad\scroll(-10)
+
+            when ('c')\byte!
+                select_pad(pads.stack) -- (C)allstack
+
+            when ('s')\byte!
+                select_pad(pads.src) -- (S)ource Code
+
+            when ('v')\byte!
+                select_pad(pads.vars) -- (V)ars
+
+            when ('o')\byte!
+                file = stack_locations[pads.stack.selected]
+                filename,line_no = file\match("([^:]*):(.*)")
+                -- Launch system editor and then redraw everything
+                --C.endwin!
+                -- Uh.... this is only mildly broken.
+                os.execute((os.getenv("EDITOR") or "nano").." +"..line_no.." "..filename)
+                --return main_loop(err_msg,pads.stack.selected,var_index)
+
+            when ('q')\byte!, ("Q")\byte!
+                break
+
+    C.endwin!
 
 
 guard = (fn, ...)->

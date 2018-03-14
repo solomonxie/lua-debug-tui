@@ -1,7 +1,7 @@
 local C = require("curses")
 local repr = require('repr')
 local COLORS = { }
-local run_debugger, guard, stdscr, main_loop
+local run_debugger, guard, stdscr
 local AUTO = -1
 local log = io.open("output.log", "w")
 local callstack_range
@@ -13,7 +13,7 @@ callstack_range = function()
       min = i - 1
       break
     end
-    if info.func == main_loop then
+    if info.func == run_debugger then
       min = i + 1
       break
     end
@@ -47,6 +47,9 @@ do
   local _class_0
   local _base_0 = {
     set_active = function(self, active)
+      if active == self.active then
+        return 
+      end
       self.active = active
       return self._pad:attrset(active and self.colors.active_frame or self.colors.inactive_frame)
     end,
@@ -83,6 +86,12 @@ do
         self:on_select(self.selected)
       end
       return self.selected
+    end,
+    scroll = function(self, delta)
+      if self.selected == nil then
+        return self:select(1)
+      end
+      return self:select(self.selected + delta)
     end,
     refresh = function(self)
       self._pad:border(C.ACS_VLINE, C.ACS_VLINE, C.ACS_HLINE, C.ACS_HLINE, C.ACS_ULCORNER, C.ACS_URCORNER, C.ACS_LLCORNER, C.ACS_LRCORNER)
@@ -202,216 +211,6 @@ local line_tables = setmetatable({ }, {
     end
   end
 })
-local err_pad, stack_pad, src_pad, var_names, var_values = nil, nil, nil, nil, nil
-main_loop = function(err_msg, stack_index, var_index, value_index)
-  local stack_names = { }
-  local stack_locations = { }
-  local max_filename = 0
-  local stack_min, stack_max = callstack_range()
-  for i = stack_min, stack_max do
-    local _continue_0 = false
-    repeat
-      local info = debug.getinfo(i)
-      if not info then
-        break
-      end
-      table.insert(stack_names, info.name or "<unnamed function>")
-      if not info.short_src then
-        _continue_0 = true
-        break
-      end
-      local line_table = line_tables[info.short_src]
-      local line
-      if line_table then
-        local char = line_table[info.currentline]
-        local line_num = 1
-        local file = file_cache[info.short_src]
-        for _ in file:sub(1, char):gmatch("\n") do
-          line_num = line_num + 1
-        end
-        line = tostring(info.short_src) .. ":" .. tostring(line_num)
-      else
-        line = info.short_src .. ":" .. info.currentline
-      end
-      table.insert(stack_locations, line)
-      max_filename = math.max(max_filename, #line)
-      _continue_0 = true
-    until true
-    if not _continue_0 then
-      break
-    end
-  end
-  local callstack = { }
-  for i = 1, #stack_names do
-    callstack[i] = stack_locations[i] .. (" "):rep(max_filename - #stack_locations[i]) .. " | " .. stack_names[i] .. " "
-  end
-  if not err_pad then
-    local err_msg_lines = wrap_text(err_msg, SCREEN_W - 4)
-    for i, line in ipairs(err_msg_lines) do
-      err_msg_lines[i] = (" "):rep(math.floor((SCREEN_W - 2 - #line) / 2)) .. line
-    end
-    err_pad = Pad(0, 0, AUTO, SCREEN_W, err_msg_lines, "Error Message", {
-      even_row = COLORS.RED | C.A_BOLD,
-      odd_row = COLORS.RED | C.A_BOLD,
-      inactive_frame = COLORS.RED | C.A_DIM
-    })
-  end
-  if not stack_pad then
-    stack_pad = Pad(err_pad.height, 0, math.max(#callstack + 2, 20), AUTO, callstack, "Callstack")
-    stack_pad.label = "Callstack"
-    stack_pad:set_active(true)
-    stack_pad:refresh()
-    stack_pad.on_select = function(self, stack_index)
-      local filename, line_no = stack_pad.lines[stack_index]:match("([^:]*):(%d*).*")
-      line_no = tonumber(line_no)
-      local file = file_cache[filename]
-      local src_lines = { }
-      local selected = nil
-      local i = 0
-      for line in file:gmatch("[^\n]*") do
-        local _continue_0 = false
-        repeat
-          i = i + 1
-          if i < line_no - (self.height - 2) / 2 then
-            _continue_0 = true
-            break
-          end
-          table.insert(src_lines, line)
-          if i == line_no then
-            selected = #src_lines
-          end
-          if #src_lines >= self.height - 2 then
-            break
-          end
-          _continue_0 = true
-        until true
-        if not _continue_0 then
-          break
-        end
-      end
-      if src_pad then
-        src_pad:erase()
-      end
-      src_pad = Pad(err_pad.height, stack_pad.x + stack_pad.width, stack_pad.height, SCREEN_W - stack_pad.x - stack_pad.width - 0, src_lines, "Source Code", {
-        highlight = COLORS.RED_BG,
-        inactive_frame = COLORS.GREEN | C.A_BOLD
-      })
-      return src_pad:select(selected)
-    end
-  end
-  stack_index = stack_pad:select(stack_index)
-  if var_names then
-    var_names:erase()
-  end
-  if var_values then
-    var_values:erase()
-  end
-  local callstack_min, _ = callstack_range()
-  local _var_names, _var_values = { }, { }
-  for loc = 1, 999 do
-    local name, value = debug.getlocal(callstack_min + stack_index - 1, loc)
-    if value == nil then
-      break
-    end
-    table.insert(_var_names, tostring(name))
-    if type(value) == 'function' then
-      local info = debug.getinfo(value, 'nS')
-      table.insert(_var_values, repr(info))
-    else
-      table.insert(_var_values, repr(value))
-    end
-  end
-  local var_y = stack_pad.y + stack_pad.height
-  local var_x = 0
-  var_names = Pad(var_y, var_x, math.min(2 + #_var_names, SCREEN_H - err_pad.height - stack_pad.height), AUTO, _var_names, "Vars")
-  if var_index and #_var_names > 0 then
-    var_names:set_active(value_index == nil)
-    stack_pad:set_active(false)
-    stack_pad:refresh()
-    var_index = var_names:select(var_index)
-  else
-    stack_pad:set_active(true)
-    stack_pad:refresh()
-  end
-  local value_x = var_names.x + var_names.width
-  local value_w = SCREEN_W - (value_x)
-  if value_index then
-    var_values = Pad(var_y, value_x, var_names.height, value_w, wrap_text(_var_values[var_index], value_w - 2), "Values")
-    var_values:set_active(true)
-    value_index = var_values:select(value_index)
-  else
-    var_values = Pad(var_y, value_x, var_names.height, value_w, _var_values, "Values")
-    var_values:set_active(false)
-  end
-  while true do
-    C.doupdate()
-    local c = stdscr:getch()
-    local _exp_0 = c
-    if C.KEY_DOWN == _exp_0 or C.KEY_SF == _exp_0 or ("j"):byte() == _exp_0 then
-      if value_index then
-        value_index = value_index + 1
-      elseif var_index then
-        var_index = var_index + 1
-      else
-        stack_index = stack_index + 1
-      end
-      return main_loop(err_msg, stack_index, var_index, value_index)
-    elseif C.KEY_UP == _exp_0 or C.KEY_SR == _exp_0 or ("k"):byte() == _exp_0 then
-      if value_index then
-        value_index = value_index - 1
-      elseif var_index then
-        var_index = var_index - 1
-      else
-        stack_index = stack_index - 1
-      end
-      return main_loop(err_msg, stack_index, var_index, value_index)
-    elseif ('J'):byte() == _exp_0 then
-      if value_index then
-        value_index = value_index + 10
-      elseif var_index then
-        var_index = var_index + 10
-      else
-        stack_index = stack_index + 10
-      end
-      return main_loop(err_msg, stack_index, var_index, value_index)
-    elseif ('K'):byte() == _exp_0 then
-      if value_index then
-        value_index = value_index - 10
-      elseif var_index then
-        var_index = var_index - 10
-      else
-        stack_index = stack_index - 10
-      end
-      return main_loop(err_msg, stack_index, var_index, value_index)
-    elseif C.KEY_RIGHT == _exp_0 or ("l"):byte() == _exp_0 then
-      if var_index == nil then
-        var_index = 1
-      elseif value_index == nil then
-        value_index = 1
-      end
-      return main_loop(err_msg, stack_index, var_index, value_index)
-    elseif C.KEY_LEFT == _exp_0 or ("h"):byte() == _exp_0 then
-      if value_index then
-        value_index = nil
-      elseif var_index then
-        var_index = nil
-      end
-      return main_loop(err_msg, stack_index, var_index, value_index)
-    elseif ('o'):byte() == _exp_0 then
-      local file = stack_locations[stack_pad.selected]
-      local filename, line_no = file:match("([^:]*):(.*)")
-      err_pad, stack_pad, src_pad, var_names, var_values = nil, nil, nil, nil, nil
-      C.endwin()
-      os.execute((os.getenv("EDITOR") or "nano") .. " +" .. line_no .. " " .. filename)
-      local initial_index = stack_pad.selected
-      return main_loop(err_msg, stack_pad.selected, var_index)
-    elseif ('q'):byte() == _exp_0 or ("Q"):byte() == _exp_0 then
-      break
-    end
-  end
-  err_pad, stack_pad, src_pad, var_names, var_values = nil, nil, nil, nil, nil
-  return C.endwin()
-end
 run_debugger = function(err_msg)
   stdscr = C.initscr()
   SCREEN_H, SCREEN_W = stdscr:getmaxyx()
@@ -442,7 +241,188 @@ run_debugger = function(err_msg)
   }
   stdscr:clear()
   stdscr:refresh()
-  return main_loop(err_msg, 1)
+  local pads = { }
+  do
+    local err_msg_lines = wrap_text(err_msg, SCREEN_W - 4)
+    for i, line in ipairs(err_msg_lines) do
+      err_msg_lines[i] = (" "):rep(math.floor((SCREEN_W - 2 - #line) / 2)) .. line
+    end
+    pads.err = Pad(0, 0, AUTO, SCREEN_W, err_msg_lines, "Error Message", {
+      even_row = COLORS.RED | C.A_BOLD,
+      odd_row = COLORS.RED | C.A_BOLD,
+      inactive_frame = COLORS.RED | C.A_DIM
+    })
+  end
+  do
+    local stack_names = { }
+    local stack_locations = { }
+    local max_filename = 0
+    local stack_min, stack_max = callstack_range()
+    for i = stack_min, stack_max do
+      local _continue_0 = false
+      repeat
+        local info = debug.getinfo(i)
+        if not info then
+          break
+        end
+        table.insert(stack_names, info.name or "<unnamed function>")
+        if not info.short_src then
+          _continue_0 = true
+          break
+        end
+        local line_table = line_tables[info.short_src]
+        local line
+        if line_table then
+          local char = line_table[info.currentline]
+          local line_num = 1
+          local file = file_cache[info.short_src]
+          for _ in file:sub(1, char):gmatch("\n") do
+            line_num = line_num + 1
+          end
+          line = tostring(info.short_src) .. ":" .. tostring(line_num)
+        else
+          line = info.short_src .. ":" .. info.currentline
+        end
+        table.insert(stack_locations, line)
+        max_filename = math.max(max_filename, #line)
+        _continue_0 = true
+      until true
+      if not _continue_0 then
+        break
+      end
+    end
+    local callstack = { }
+    for i = 1, #stack_names do
+      callstack[i] = stack_locations[i] .. (" "):rep(max_filename - #stack_locations[i]) .. " | " .. stack_names[i] .. " "
+    end
+    pads.stack = Pad(pads.err.height, 0, math.max(#callstack + 2, 20), AUTO, callstack, "(C)allstack")
+    pads.stack:set_active(true)
+    pads.stack:refresh()
+  end
+  local show_src
+  show_src = function(filename, line_no)
+    local file = file_cache[filename]
+    local src_lines = { }
+    local selected = nil
+    if file then
+      local i = 0
+      for line in file:gmatch("[^\n]*") do
+        local _continue_0 = false
+        repeat
+          i = i + 1
+          if i < line_no - (pads.stack.height - 2) / 2 then
+            _continue_0 = true
+            break
+          end
+          table.insert(src_lines, line)
+          if i == line_no then
+            selected = #src_lines
+          end
+          if #src_lines >= pads.stack.height - 2 then
+            break
+          end
+          _continue_0 = true
+        until true
+        if not _continue_0 then
+          break
+        end
+      end
+    else
+      table.insert(src_lines, "<no source code found>")
+    end
+    if pads.src then
+      pads.src:erase()
+    end
+    pads.src = Pad(pads.err.height, pads.stack.x + pads.stack.width, pads.stack.height, SCREEN_W - pads.stack.x - pads.stack.width - 0, src_lines, "(S)ource Code", {
+      highlight = COLORS.RED_BG,
+      inactive_frame = COLORS.GREEN | C.A_BOLD
+    })
+    return pads.src:select(selected)
+  end
+  local show_vars
+  show_vars = function(stack_index)
+    if pads.vars then
+      pads.vars:erase()
+    end
+    if pads.values then
+      pads.values:erase()
+    end
+    local callstack_min
+    callstack_min, _ = callstack_range()
+    local var_names, values = { }, { }
+    for loc = 1, 999 do
+      local name, value = debug.getlocal(callstack_min + stack_index - 1, loc)
+      if value == nil then
+        break
+      end
+      table.insert(var_names, tostring(name))
+      if type(value) == 'function' then
+        local info = debug.getinfo(value, 'nS')
+        table.insert(values, repr(info))
+      else
+        table.insert(values, repr(value))
+      end
+    end
+    local var_y = pads.stack.y + pads.stack.height
+    local var_x = 0
+    pads.vars = Pad(var_y, var_x, math.min(2 + #var_names, SCREEN_H - pads.err.height - pads.stack.height), AUTO, var_names, "(V)ars")
+    pads.vars.on_select = function(self, var_index)
+      local value_x = pads.vars.x + pads.vars.width
+      local value_w = SCREEN_W - (value_x)
+      if var_index then
+        pads.values = Pad(var_y, value_x, pads.vars.height, value_w, wrap_text(values[var_index], value_w - 2), "Values")
+      else
+        pads.values = Pad(var_y, value_x, pads.vars.height, value_w, values, "Values")
+      end
+    end
+    return pads.vars:select(1)
+  end
+  pads.stack.on_select = function(self, stack_index)
+    local filename, line_no = pads.stack.lines[stack_index]:match("([^:]*):(%d*).*")
+    line_no = tonumber(line_no)
+    show_src(filename, line_no)
+    return show_vars(stack_index)
+  end
+  pads.stack:select(1)
+  pads.stack:set_active(true)
+  local selected_pad = pads.stack
+  local select_pad
+  select_pad = function(pad)
+    if selected_pad ~= pad then
+      selected_pad:set_active(false)
+      selected_pad:refresh()
+      selected_pad = pad
+      selected_pad:set_active(true)
+      return selected_pad:refresh()
+    end
+  end
+  while true do
+    C.doupdate()
+    local c = stdscr:getch()
+    local _exp_0 = c
+    if C.KEY_DOWN == _exp_0 or C.KEY_SF == _exp_0 or ("j"):byte() == _exp_0 then
+      selected_pad:scroll(1)
+    elseif C.KEY_UP == _exp_0 or C.KEY_SR == _exp_0 or ("k"):byte() == _exp_0 then
+      selected_pad:scroll(-1)
+    elseif ('J'):byte() == _exp_0 then
+      selected_pad:scroll(10)
+    elseif ('K'):byte() == _exp_0 then
+      selected_pad:scroll(-10)
+    elseif ('c'):byte() == _exp_0 then
+      select_pad(pads.stack)
+    elseif ('s'):byte() == _exp_0 then
+      select_pad(pads.src)
+    elseif ('v'):byte() == _exp_0 then
+      select_pad(pads.vars)
+    elseif ('o'):byte() == _exp_0 then
+      local file = stack_locations[pads.stack.selected]
+      local filename, line_no = file:match("([^:]*):(.*)")
+      os.execute((os.getenv("EDITOR") or "nano") .. " +" .. line_no .. " " .. filename)
+    elseif ('q'):byte() == _exp_0 or ("Q"):byte() == _exp_0 then
+      break
+    end
+  end
+  return C.endwin()
 end
 guard = function(fn, ...)
   local err_hand
