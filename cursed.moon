@@ -1,6 +1,6 @@
 C = require "curses"
 repr = require 'repr'
-local REGULAR, INVERTED, HIGHLIGHTED, RED, BLUE, SCREEN_H, SCREEN_W
+COLORS = {}
 local run_debugger, guard, stdscr, main_loop
 AUTO = -1
 log = io.open("output.log", "w")
@@ -34,36 +34,45 @@ wrap_text = (text, width)->
             table.insert(lines, line)
     return lines
 
-alternating_colors = setmetatable({}, {__index:(i)=> if i % 2 == 0 then INVERTED else REGULAR})
+default_colors = {
+}
+
 class Pad
-    new: (@y,@x,@height,@width,@lines,@attrs=alternating_colors, pad_attr=0)=>
-        --log\write("New Pad:\n  #{table.concat @lines, "\n  "}\n")
-        @offset = 0
+    new: (@y,@x,@height,@width,@lines,@label,@colors=default_colors)=>
+        if @colors and @colors != default_colors
+            setmetatable(@colors, __index:default_colors)
+        @scroll_y, @scroll_x = 0, 0
         @selected = nil
 
-        @_height = #@lines + 2
-        @_width = @width == AUTO and 2 or @width
-        for x in *@lines do @_width = math.max(@_width, #x+2)
+        if @width == AUTO
+            @width = 2
+            for x in *@lines do @width = math.max(@width, #x+2)
+        @_width = @width
 
         if @height == AUTO
-            @height = @_height
-        if @width == AUTO
-            @width = @_width
+            @height = #@lines + 2
+        @_height = @height
 
-        --log\write("#lines = #{#@lines}, height = #{@_height}, width = #{@_width}\n")
         @_pad = C.newpad(@_height, @_width)
         @_pad\scrollok(true)
-        @_pad\attrset(pad_attr)
+        @set_active false
 
         @chstrs = {}
         for i, line in ipairs(@lines)
-            attr = @attrs[i]
+            attr = (i % 2 == 0) and @colors.even_row or @colors.odd_row
             chstr = C.new_chstr(@width-2)
             @chstrs[i] = chstr
+            if #line >= chstr\len!
+                line = line\sub(1, chstr\len!)
+            else
+                line ..= (" ")\rep(chstr\len!-#line)
             chstr\set_str(0, line, attr)
-            chstr\set_str(#line+0, ' ', attr, chstr\len!-#line)
             @_pad\mvaddchstr(i-1+1,0+1,chstr)
         @refresh!
+    
+    set_active: (active)=>
+        @active = active
+        @_pad\attrset(active and @colors.active_frame or @colors.inactive_frame)
     
     select: (i)=>
         if i == @selected or #@lines == 0 then return @selected
@@ -71,23 +80,24 @@ class Pad
             i = math.max(1, math.min(#@lines, i))
         if @selected
             j = @selected
-            @chstrs[j]\set_str(0, @lines[j], @attrs[j])
-            @chstrs[j]\set_str(#@lines[j], ' ', @attrs[j], @chstrs[j]\len!-#@lines[j])
+            attr = (j % 2 == 0) and @colors.even_row or @colors.odd_row
+            @chstrs[j]\set_str(0, @lines[j], attr)
+            @chstrs[j]\set_str(#@lines[j], ' ', attr, @chstrs[j]\len!-#@lines[j])
             @_pad\mvaddchstr(j-1+1,0+1,@chstrs[j])
 
         if i
-            assert(@chstrs[i], "DIDN'T FIND CHSTR: #{i}/#{#@chstrs} (#{#@lines})")
-            @chstrs[i]\set_str(0, @lines[i], HIGHLIGHTED)
-            @chstrs[i]\set_str(#@lines[i], ' ', HIGHLIGHTED, @chstrs[i]\len!-#@lines[i])
+            attr = @active and @colors.active or @colors.highlight
+            @chstrs[i]\set_str(0, @lines[i], attr)
+            @chstrs[i]\set_str(#@lines[i], ' ', attr, @chstrs[i]\len!-#@lines[i])
             @_pad\mvaddchstr(i-1+1,0+1,@chstrs[i])
 
         @selected = i
 
         if @selected
-            if @offset + @height-1 < @selected
-                @offset = math.min(@selected - (@height-1), #@lines-@height)
-            elseif @offset + 1 > @selected
-                @offset = @selected - 1
+            if @scroll_y + @height-1 < @selected
+                @scroll_y = math.min(@selected - (@height-1), #@lines-@height)
+            elseif @scroll_y + 1 > @selected
+                @scroll_y = @selected - 1
         @refresh!
         if @on_select then @on_select(@selected)
         return @selected
@@ -97,11 +107,13 @@ class Pad
             C.ACS_HLINE, C.ACS_HLINE,
             C.ACS_ULCORNER, C.ACS_URCORNER,
             C.ACS_LLCORNER, C.ACS_LRCORNER)
-        @_pad\pnoutrefresh(@offset,0,@y,@x,@y+@height+1,@x+@width)
+        if @label
+            @_pad\mvaddstr(0, math.floor((@width-#@label-2)/2), " #{@label} ")
+        @_pad\pnoutrefresh(@scroll_y,@scroll_x,@y,@x,@y+@height+1,@x+@width)
     
     erase: =>
         @_pad\erase!
-        @_pad\pnoutrefresh(@offset,0,@y,@x,@y+@height,@x+@width)
+        @_pad\pnoutrefresh(@scroll_y,@scroll_x,@y,@x,@y+@height,@x+@width)
     
     clear: =>
         @erase!
@@ -113,7 +125,7 @@ class Pad
         if @resize_width
             @set_size(@height, @_width)
         @selected = nil
-        @offset = 0
+        @scroll_y, @scroll_x = 0, 0
         @refresh!
     
 
@@ -136,7 +148,7 @@ line_tables = setmetatable({}, {__index:(filename)=>
         return line_table
 })
 
-err_pad, stack_pad, var_names, var_values = nil, nil, nil, nil
+err_pad, stack_pad, src_pad, var_names, var_values = nil, nil, nil, nil, nil
 
 main_loop = (err_msg, stack_index, var_index, value_index)->
     export err_pad, stack_pad, var_names, var_values
@@ -167,10 +179,45 @@ main_loop = (err_msg, stack_index, var_index, value_index)->
 
     if not err_pad
         err_msg_lines = wrap_text(err_msg, SCREEN_W - 4)
-        err_pad = Pad(0,0,AUTO,SCREEN_W, err_msg_lines,setmetatable({}, __index:->RED), RED)
+        for i,line in ipairs(err_msg_lines)
+            err_msg_lines[i] = (" ")\rep(math.floor((SCREEN_W-2-#line)/2))..line
+        err_pad = Pad(0,0,AUTO,SCREEN_W, err_msg_lines, "Error Message", {
+            even_row: COLORS.RED | C.A_BOLD, odd_row: COLORS.RED | C.A_BOLD,
+            inactive_frame: COLORS.RED | C.A_DIM
+        })
 
     if not stack_pad
-        stack_pad = Pad(err_pad.height,0,AUTO,SCREEN_W, callstack, nil, BLUE)
+        stack_pad = Pad(err_pad.height,0,math.max(#callstack+2, 20),AUTO, callstack, "Callstack")
+        stack_pad.label = "Callstack"
+        stack_pad\set_active(true)
+        stack_pad\refresh!
+
+        stack_pad.on_select = (stack_index)=>
+            filename, line_no = stack_pad.lines[stack_index]\match("([^:]*):(%d*).*")
+            line_no = tonumber(line_no)
+            file = file_cache[filename]
+            src_lines = {}
+            selected = nil
+            i = 0
+            for line in file\gmatch("[^\n]*")
+                i += 1
+                if i < line_no-(@height-2)/2
+                    continue
+                table.insert src_lines, line
+                if i == line_no
+                    selected = #src_lines
+                if #src_lines >= @height-2
+                    break
+            export src_pad
+            if src_pad
+                src_pad\erase!
+            src_pad = Pad(err_pad.height,stack_pad.x+stack_pad.width,
+                stack_pad.height,SCREEN_W-stack_pad.x-stack_pad.width-0, src_lines, "Source Code", {
+                    highlight: COLORS.RED_BG,
+                    inactive_frame: COLORS.GREEN | C.A_BOLD,
+                })
+            src_pad\select(selected)
+
     stack_index = stack_pad\select(stack_index)
 
     if var_names
@@ -193,17 +240,25 @@ main_loop = (err_msg, stack_index, var_index, value_index)->
     
     var_y = stack_pad.y + stack_pad.height
     var_x = 0
-    var_names = Pad(var_y,var_x,AUTO,AUTO,_var_names, nil, BLUE)
+    var_names = Pad(var_y,var_x,math.min(2+#_var_names, SCREEN_H-err_pad.height-stack_pad.height),AUTO,_var_names,"Vars")
     if var_index and #_var_names > 0
+        var_names\set_active(value_index == nil)
+        stack_pad\set_active(false)
+        stack_pad\refresh!
         var_index = var_names\select(var_index)
+    else
+        stack_pad\set_active(true)
+        stack_pad\refresh!
 
     value_x = var_names.x+var_names.width
     value_w = SCREEN_W-(value_x)
     if value_index
-        var_values = Pad(var_y,value_x,AUTO,value_w,wrap_text(_var_values[var_index], value_w-2), nil, BLUE)
+        var_values = Pad(var_y,value_x,var_names.height,value_w,wrap_text(_var_values[var_index], value_w-2), "Values")
+        var_values\set_active(true)
         value_index = var_values\select(value_index)
     else
-        var_values = Pad(var_y,value_x,AUTO,value_w,_var_values, nil, BLUE)
+        var_values = Pad(var_y,value_x,var_names.height,value_w,_var_values, "Values")
+        var_values\set_active(false)
 
     while true
         C.doupdate!
@@ -263,8 +318,8 @@ main_loop = (err_msg, stack_index, var_index, value_index)->
                 file = stack_locations[stack_pad.selected]
                 filename,line_no = file\match("([^:]*):(.*)")
                 -- Launch system editor and then redraw everything
+                err_pad, stack_pad, src_pad, var_names, var_values = nil, nil, nil, nil, nil
                 C.endwin!
-                err_pad, stack_pad, var_names, var_values = nil, nil, nil, nil
                 os.execute((os.getenv("EDITOR") or "nano").." +"..line_no.." "..filename)
                 initial_index = stack_pad.selected
                 return main_loop(err_msg,stack_pad.selected,var_index)
@@ -272,7 +327,7 @@ main_loop = (err_msg, stack_index, var_index, value_index)->
             when ('q')\byte!, ("Q")\byte!
                 break
 
-    err_pad, stack_pad, var_names, var_values = nil, nil, nil, nil
+    err_pad, stack_pad, src_pad, var_names, var_values = nil, nil, nil, nil, nil
     C.endwin!
 
 run_debugger = (err_msg)->
@@ -287,12 +342,25 @@ run_debugger = (err_msg)->
     C.start_color!
     C.use_default_colors!
 
-    export REGULAR, INVERTED, HIGHLIGHTED, RED, BLUE
-    _, REGULAR = C.init_pair(1, -1, -1), C.color_pair(1)
-    _, INVERTED = C.init_pair(2, -1, C.COLOR_BLACK), C.color_pair(2)
-    _, HIGHLIGHTED = C.init_pair(3, C.COLOR_BLACK, C.COLOR_YELLOW), C.color_pair(3)
-    _, RED = C.init_pair(4, C.COLOR_RED, -1), C.color_pair(4) | C.A_BOLD
-    _, BLUE = C.init_pair(5, C.COLOR_BLUE, -1), C.color_pair(5) | C.A_BOLD
+    _, COLORS.REGULAR = C.init_pair(1, C.COLOR_WHITE, -1), C.color_pair(1)
+    _, COLORS.INVERTED = C.init_pair(2, C.COLOR_WHITE, C.COLOR_BLACK), C.color_pair(2)
+    _, COLORS.YELLOW_BG = C.init_pair(3, C.COLOR_BLACK, C.COLOR_YELLOW), C.color_pair(3)
+    _, COLORS.RED = C.init_pair(4, C.COLOR_RED, -1), C.color_pair(4)
+    _, COLORS.BLUE = C.init_pair(5, C.COLOR_BLUE, -1), C.color_pair(5) | C.A_BOLD
+    _, COLORS.WHITE = C.init_pair(6, C.COLOR_WHITE, -1), C.color_pair(6)
+    _, COLORS.WHITE_BG = C.init_pair(7, C.COLOR_BLACK, C.COLOR_WHITE), C.color_pair(7)
+    _, COLORS.BROWN = C.init_pair(8, C.COLOR_BLACK, -1), C.color_pair(8) | C.A_BOLD
+    _, COLORS.RED_BG = C.init_pair(9, C.COLOR_YELLOW, C.COLOR_RED), C.color_pair(9) | C.A_BOLD | C.A_DIM
+    _, COLORS.GREEN = C.init_pair(10, C.COLOR_GREEN, -1), C.color_pair(10)
+    export default_colors
+    default_colors = {
+        active_frame: COLORS.BLUE,
+        inactive_frame: COLORS.BROWN,
+        odd_row: COLORS.REGULAR,
+        even_row: COLORS.INVERTED,
+        highlight: COLORS.WHITE_BG,
+        active: COLORS.YELLOW_BG,
+    }
 
     stdscr\clear!
     stdscr\refresh!
