@@ -19,7 +19,7 @@ callstack_range = ->
     for i=min,999
         info = debug.getinfo(i, 'f')
         if not info or info.func == guard
-            max = i-3
+            max = i-0
             break
     return min, max
 
@@ -131,8 +131,8 @@ class Pad
         @_frame\refresh!
     
     __gc: =>
-        @_frame\cancel!
-        @_pad\cancel!
+        @_frame\close!
+        @_pad\close!
 
 ok, to_lua = pcall -> require('moonscript.base').to_lua
 if not ok then to_lua = -> nil
@@ -154,6 +154,7 @@ line_tables = setmetatable({}, {__index:(filename)=>
 })
 
 run_debugger = (err_msg)->
+    log\write(err_msg.."\n\n")
     export stdscr, SCREEN_H, SCREEN_W
     stdscr = C.initscr!
     SCREEN_H, SCREEN_W = stdscr\getmaxyx!
@@ -184,6 +185,18 @@ run_debugger = (err_msg)->
         active: COLORS.YELLOW_BG,
     }
 
+    do -- Fullscreen flash
+        stdscr\wbkgd(COLORS.RED_BG)
+        stdscr\clear!
+        stdscr\refresh!
+        lines = wrap_text("ERROR!\n \n "..err_msg.."\n \npress any key...", math.floor(SCREEN_W/2))
+        for i, line in ipairs(lines)
+            stdscr\mvaddstr(math.floor(SCREEN_H/2 - #lines/2)+i, math.floor((SCREEN_W-#line)/2), line)
+        stdscr\refresh!
+        C.doupdate!
+        stdscr\getch!
+
+    stdscr\wbkgd(COLORS.REGULAR)
     stdscr\clear!
     stdscr\refresh!
 
@@ -198,9 +211,9 @@ run_debugger = (err_msg)->
             inactive_frame: COLORS.RED | C.A_DIM
         })
 
+    stack_locations = {}
     do -- Stack pad
         stack_names = {}
-        stack_locations = {}
         max_filename = 0
         stack_min, stack_max = callstack_range!
         for i=stack_min,stack_max
@@ -252,7 +265,7 @@ run_debugger = (err_msg)->
             pads.src\erase!
         pads.src = Pad(pads.err.height,pads.stack.x+pads.stack.width,
             pads.stack.height,SCREEN_W-pads.stack.x-pads.stack.width-0, src_lines, "(S)ource Code", {
-                line_colors:setmetatable({[err_line]:COLORS.RED_BG}, {__index:(i)=> (i % 2 == 0) and INVERTED or REGULAR})
+                line_colors:setmetatable({[err_line or -1]:COLORS.RED_BG}, {__index:(i)=> (i % 2 == 0) and INVERTED or REGULAR})
             })
         pads.src\select(err_line)
     
@@ -286,6 +299,8 @@ run_debugger = (err_msg)->
                 pads.values = Pad(var_y,value_x,pads.vars.height,value_w,wrap_text(values[var_index], value_w-2), "Values")
             else
                 pads.values = Pad(var_y,value_x,pads.vars.height,value_w,values, "Values")
+            collectgarbage()
+            collectgarbage()
 
         pads.vars\select(1)
 
@@ -344,19 +359,30 @@ run_debugger = (err_msg)->
                 file = stack_locations[pads.stack.selected]
                 filename,line_no = file\match("([^:]*):(.*)")
                 -- Launch system editor and then redraw everything
-                --C.endwin!
-                -- Uh.... this is only mildly broken.
+                C.endwin!
                 os.execute((os.getenv("EDITOR") or "nano").." +"..line_no.." "..filename)
-                --return main_loop(err_msg,pads.stack.selected,var_index)
+                stdscr = C.initscr!
+                C.cbreak!
+                C.echo(false)
+                C.nl(false)
+                C.curs_set(0)
+                C.start_color!
+                C.use_default_colors!
+                stdscr\clear!
+                stdscr\refresh!
+                for _,pad in pairs(pads) do pad\refresh!
 
             when ('q')\byte!, ("Q")\byte!
-                break
+                pads = {}
+                C.endwin!
+                return
 
     C.endwin!
 
 
 guard = (fn, ...)->
     err_hand = (err)->
+        log\write(err.."\n\n\n")
         C.endwin!
         print "Caught an error:"
         print(debug.traceback(err, 2))
@@ -366,6 +392,7 @@ guard = (fn, ...)->
 
 breakpoint = ->
     err_hand = (err)->
+        log\write(err.."\n\n\n")
         C.endwin!
         print "Caught an error:"
         print(debug.traceback(err, 2))

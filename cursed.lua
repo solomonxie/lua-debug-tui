@@ -21,7 +21,7 @@ callstack_range = function()
   for i = min, 999 do
     local info = debug.getinfo(i, 'f')
     if not info or info.func == guard then
-      max = i - 3
+      max = i - 0
       break
     end
   end
@@ -113,8 +113,8 @@ do
       return self._frame:refresh()
     end,
     __gc = function(self)
-      self._frame:cancel()
-      return self._pad:cancel()
+      self._frame:close()
+      return self._pad:close()
     end
   }
   _base_0.__index = _base_0
@@ -210,6 +210,7 @@ local line_tables = setmetatable({ }, {
   end
 })
 run_debugger = function(err_msg)
+  log:write(err_msg .. "\n\n")
   stdscr = C.initscr()
   SCREEN_H, SCREEN_W = stdscr:getmaxyx()
   C.cbreak()
@@ -240,6 +241,19 @@ run_debugger = function(err_msg)
     highlight = COLORS.WHITE_BG,
     active = COLORS.YELLOW_BG
   }
+  do
+    stdscr:wbkgd(COLORS.RED_BG)
+    stdscr:clear()
+    stdscr:refresh()
+    local lines = wrap_text("ERROR!\n \n " .. err_msg .. "\n \npress any key...", math.floor(SCREEN_W / 2))
+    for i, line in ipairs(lines) do
+      stdscr:mvaddstr(math.floor(SCREEN_H / 2 - #lines / 2) + i, math.floor((SCREEN_W - #line) / 2), line)
+    end
+    stdscr:refresh()
+    C.doupdate()
+    stdscr:getch()
+  end
+  stdscr:wbkgd(COLORS.REGULAR)
   stdscr:clear()
   stdscr:refresh()
   local pads = { }
@@ -257,9 +271,9 @@ run_debugger = function(err_msg)
       inactive_frame = COLORS.RED | C.A_DIM
     })
   end
+  local stack_locations = { }
   do
     local stack_names = { }
-    local stack_locations = { }
     local max_filename = 0
     local stack_min, stack_max = callstack_range()
     for i = stack_min, stack_max do
@@ -328,7 +342,7 @@ run_debugger = function(err_msg)
     end
     pads.src = Pad(pads.err.height, pads.stack.x + pads.stack.width, pads.stack.height, SCREEN_W - pads.stack.x - pads.stack.width - 0, src_lines, "(S)ource Code", {
       line_colors = setmetatable({
-        [err_line] = COLORS.RED_BG
+        [err_line or -1] = COLORS.RED_BG
       }, {
         __index = function(self, i)
           return (i % 2 == 0) and INVERTED or REGULAR
@@ -372,6 +386,8 @@ run_debugger = function(err_msg)
       else
         pads.values = Pad(var_y, value_x, pads.vars.height, value_w, values, "Values")
       end
+      collectgarbage()
+      return collectgarbage()
     end
     return pads.vars:select(1)
   end
@@ -423,9 +439,24 @@ run_debugger = function(err_msg)
     elseif ('o'):byte() == _exp_0 then
       local file = stack_locations[pads.stack.selected]
       local filename, line_no = file:match("([^:]*):(.*)")
+      C.endwin()
       os.execute((os.getenv("EDITOR") or "nano") .. " +" .. line_no .. " " .. filename)
+      stdscr = C.initscr()
+      C.cbreak()
+      C.echo(false)
+      C.nl(false)
+      C.curs_set(0)
+      C.start_color()
+      C.use_default_colors()
+      stdscr:clear()
+      stdscr:refresh()
+      for _, pad in pairs(pads) do
+        pad:refresh()
+      end
     elseif ('q'):byte() == _exp_0 or ("Q"):byte() == _exp_0 then
-      break
+      pads = { }
+      C.endwin()
+      return 
     end
   end
   return C.endwin()
@@ -433,6 +464,7 @@ end
 guard = function(fn, ...)
   local err_hand
   err_hand = function(err)
+    log:write(err .. "\n\n\n")
     C.endwin()
     print("Caught an error:")
     print(debug.traceback(err, 2))
@@ -446,6 +478,7 @@ local breakpoint
 breakpoint = function()
   local err_hand
   err_hand = function(err)
+    log:write(err .. "\n\n\n")
     C.endwin()
     print("Caught an error:")
     print(debug.traceback(err, 2))
