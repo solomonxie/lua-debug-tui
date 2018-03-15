@@ -2,7 +2,7 @@ C = require "curses"
 repr = require 'repr'
 COLORS = {}
 local run_debugger, guard, stdscr
-AUTO = -1
+AUTO = {}
 log = io.open("output.log", "w")
 
 -- Return the callstack index of the code that actually caused an error and the max index
@@ -41,17 +41,19 @@ class Pad
     new: (@y,@x,@height,@width,@lines,@label,@colors=default_colors)=>
         if @colors and @colors != default_colors
             setmetatable(@colors, __index:default_colors)
-        @scroll_y, @scroll_x = 0, 0
+        @scroll_y, @scroll_x = 1, 1
         @selected = nil
 
-        if @width == AUTO
-            @width = 2
-            for x in *@lines do @width = math.max(@width, #x+2)
-        @_width = @width
-
+        @_height = #@lines
         if @height == AUTO
-            @height = #@lines + 2
-        @_height = @height
+            @height = @_height + 2
+
+        @_width = 0
+        for x in *@lines do @_width = math.max(@_width, #x+2)
+        if @width == AUTO
+            @width = @_width + 2
+
+        @_frame = C.newwin(@height, @width, @y, @x)
 
         @_pad = C.newpad(@_height, @_width)
         @_pad\scrollok(true)
@@ -59,81 +61,78 @@ class Pad
 
         @chstrs = {}
         for i, line in ipairs(@lines)
-            attr = (i % 2 == 0) and @colors.even_row or @colors.odd_row
-            chstr = C.new_chstr(@width-2)
+            attr = @colors.line_colors[i]
+            chstr = C.new_chstr(@_width)
             @chstrs[i] = chstr
             if #line >= chstr\len!
                 line = line\sub(1, chstr\len!)
             else
                 line ..= (" ")\rep(chstr\len!-#line)
             chstr\set_str(0, line, attr)
-            @_pad\mvaddchstr(i-1+1,0+1,chstr)
+            @_pad\mvaddchstr(i-1,0,chstr)
         @refresh!
     
     set_active: (active)=>
         return if active == @active
         @active = active
-        @_pad\attrset(active and @colors.active_frame or @colors.inactive_frame)
+        @_frame\attrset(active and @colors.active_frame or @colors.inactive_frame)
     
     select: (i)=>
-        if i == @selected or #@lines == 0 then return @selected
+        if #@lines == 0 then i = nil
+        if i == @selected then return @selected
         if i != nil
             i = math.max(1, math.min(#@lines, i))
         if @selected
             j = @selected
-            attr = (j % 2 == 0) and @colors.even_row or @colors.odd_row
+            attr = @colors.line_colors[j]
             @chstrs[j]\set_str(0, @lines[j], attr)
             @chstrs[j]\set_str(#@lines[j], ' ', attr, @chstrs[j]\len!-#@lines[j])
-            @_pad\mvaddchstr(j-1+1,0+1,@chstrs[j])
+            @_pad\mvaddchstr(j-1,0,@chstrs[j])
 
         if i
             attr = @active and @colors.active or @colors.highlight
             @chstrs[i]\set_str(0, @lines[i], attr)
             @chstrs[i]\set_str(#@lines[i], ' ', attr, @chstrs[i]\len!-#@lines[i])
-            @_pad\mvaddchstr(i-1+1,0+1,@chstrs[i])
+            @_pad\mvaddchstr(i-1,0,@chstrs[i])
+
+            scrolloff = 3
+            if i > @scroll_y + (@height-2) - scrolloff
+                @scroll_y = i - (@height-2) + scrolloff
+            elseif i < @scroll_y + scrolloff
+                @scroll_y = i - scrolloff
+            @scroll_y = math.max(1, math.min(#@lines, @scroll_y))
 
         @selected = i
-
-        if @selected
-            if @scroll_y + @height-1 < @selected
-                @scroll_y = math.min(@selected - (@height-1), #@lines-@height)
-            elseif @scroll_y + 1 > @selected
-                @scroll_y = @selected - 1
         @refresh!
         if @on_select then @on_select(@selected)
         return @selected
     
-    scroll: (delta)=>
-        if @selected == nil
-            return @select 1
-        @select(@selected + delta)
+    scroll: (dy,dx)=>
+        if @selected != nil
+            @select(@selected + (dy or 0))
+        else
+            @scroll_y = math.max(1, math.min(@_height-@height, @scroll_y+(dy or 0)))
+        @scroll_x = math.max(1, math.min(@_width-@width, @scroll_x+(dx or 0)))
+        @refresh!
     
     refresh: =>
-        @_pad\border(C.ACS_VLINE, C.ACS_VLINE,
+        @_frame\border(C.ACS_VLINE, C.ACS_VLINE,
             C.ACS_HLINE, C.ACS_HLINE,
             C.ACS_ULCORNER, C.ACS_URCORNER,
             C.ACS_LLCORNER, C.ACS_LRCORNER)
         if @label
-            @_pad\mvaddstr(0, math.floor((@width-#@label-2)/2), " #{@label} ")
-        @_pad\pnoutrefresh(@scroll_y,@scroll_x,@y,@x,@y+@height+1,@x+@width)
+            @_frame\mvaddstr(0, math.floor((@width-#@label-2)/2), " #{@label} ")
+        @_frame\refresh!
+        h,w = math.min(@height-2,@_height),math.min(@width-2,@_width)
+        @_pad\pnoutrefresh(@scroll_y-1,@scroll_x-1,@y+1,@x+1,@y+h,@x+w)
     
     erase: =>
-        @_pad\erase!
-        @_pad\pnoutrefresh(@scroll_y,@scroll_x,@y,@x,@y+@height,@x+@width)
+        @_frame\erase!
+        @_frame\refresh!
     
-    clear: =>
-        @erase!
-        @lines = {}
-        @chstrs = {}
-        @set_internal_size(2,2)
-        if @resize_height
-            @set_size(@_height, @width)
-        if @resize_width
-            @set_size(@height, @_width)
-        @selected = nil
-        @scroll_y, @scroll_x = 0, 0
-        @refresh!
-    
+    __gc: =>
+        @_frame\cancel!
+        @_pad\cancel!
 
 ok, to_lua = pcall -> require('moonscript.base').to_lua
 if not ok then to_lua = -> nil
@@ -180,8 +179,7 @@ run_debugger = (err_msg)->
     default_colors = {
         active_frame: COLORS.BLUE,
         inactive_frame: COLORS.BROWN,
-        odd_row: COLORS.REGULAR,
-        even_row: COLORS.INVERTED,
+        line_colors: setmetatable({}, __index:(i)=> (i % 2 == 0 and COLORS.INVERTED or COLORS.REGULAR))
         highlight: COLORS.WHITE_BG,
         active: COLORS.YELLOW_BG,
     }
@@ -196,7 +194,7 @@ run_debugger = (err_msg)->
         for i,line in ipairs(err_msg_lines)
             err_msg_lines[i] = (" ")\rep(math.floor((SCREEN_W-2-#line)/2))..line
         pads.err = Pad(0,0,AUTO,SCREEN_W, err_msg_lines, "Error Message", {
-            even_row: COLORS.RED | C.A_BOLD, odd_row: COLORS.RED | C.A_BOLD,
+            line_colors: setmetatable({}, __index:->COLORS.RED | C.A_BOLD)
             inactive_frame: COLORS.RED | C.A_DIM
         })
 
@@ -233,18 +231,20 @@ run_debugger = (err_msg)->
     show_src = (filename, line_no)->
         file = file_cache[filename]
         src_lines = {}
-        selected = nil
+        err_line = nil
         if file
             i = 0
             for line in file\gmatch("[^\n]*")
                 i += 1
-                if i < line_no-(pads.stack.height-2)/2
-                    continue
+                --if i < line_no-(pads.stack.height-2)/2
+                --    continue
                 table.insert src_lines, line
                 if i == line_no
-                    selected = #src_lines
-                if #src_lines >= pads.stack.height-2
-                    break
+                    err_line = #src_lines
+                --if #src_lines >= pads.stack.height-2
+                --    break
+            while #src_lines < pads.stack.height
+                table.insert(src_lines, "")
         else
             table.insert(src_lines, "<no source code found>")
 
@@ -252,10 +252,9 @@ run_debugger = (err_msg)->
             pads.src\erase!
         pads.src = Pad(pads.err.height,pads.stack.x+pads.stack.width,
             pads.stack.height,SCREEN_W-pads.stack.x-pads.stack.width-0, src_lines, "(S)ource Code", {
-                highlight: COLORS.RED_BG,
-                inactive_frame: COLORS.GREEN | C.A_BOLD,
+                line_colors:setmetatable({[err_line]:COLORS.RED_BG}, {__index:(i)=> (i % 2 == 0) and INVERTED or REGULAR})
             })
-        pads.src\select(selected)
+        pads.src\select(err_line)
     
     show_vars = (stack_index)->
         if pads.vars
@@ -313,16 +312,24 @@ run_debugger = (err_msg)->
         c = stdscr\getch!
         switch c
             when C.KEY_DOWN, C.KEY_SF, ("j")\byte!
-                selected_pad\scroll(1)
+                selected_pad\scroll(1,0)
+            when ('J')\byte!
+                selected_pad\scroll(10,0)
 
             when C.KEY_UP, C.KEY_SR, ("k")\byte!
-                selected_pad\scroll(-1)
-
-            when ('J')\byte!
-                selected_pad\scroll(10)
-
+                selected_pad\scroll(-1,0)
             when ('K')\byte!
-                selected_pad\scroll(-10)
+                selected_pad\scroll(-10,0)
+
+            when C.KEY_RIGHT, ("l")\byte!
+                selected_pad\scroll(0,1)
+            when ("L")\byte!
+                selected_pad\scroll(0,10)
+
+            when C.KEY_LEFT, ("h")\byte!
+                selected_pad\scroll(0,-1)
+            when ("H")\byte!
+                selected_pad\scroll(0,-10)
 
             when ('c')\byte!
                 select_pad(pads.stack) -- (C)allstack

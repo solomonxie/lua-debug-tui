@@ -2,7 +2,7 @@ local C = require("curses")
 local repr = require('repr')
 local COLORS = { }
 local run_debugger, guard, stdscr
-local AUTO = -1
+local AUTO = { }
 local log = io.open("output.log", "w")
 local callstack_range
 callstack_range = function()
@@ -51,10 +51,13 @@ do
         return 
       end
       self.active = active
-      return self._pad:attrset(active and self.colors.active_frame or self.colors.inactive_frame)
+      return self._frame:attrset(active and self.colors.active_frame or self.colors.inactive_frame)
     end,
     select = function(self, i)
-      if i == self.selected or #self.lines == 0 then
+      if #self.lines == 0 then
+        i = nil
+      end
+      if i == self.selected then
         return self.selected
       end
       if i ~= nil then
@@ -62,62 +65,56 @@ do
       end
       if self.selected then
         local j = self.selected
-        local attr = (j % 2 == 0) and self.colors.even_row or self.colors.odd_row
+        local attr = self.colors.line_colors[j]
         self.chstrs[j]:set_str(0, self.lines[j], attr)
         self.chstrs[j]:set_str(#self.lines[j], ' ', attr, self.chstrs[j]:len() - #self.lines[j])
-        self._pad:mvaddchstr(j - 1 + 1, 0 + 1, self.chstrs[j])
+        self._pad:mvaddchstr(j - 1, 0, self.chstrs[j])
       end
       if i then
         local attr = self.active and self.colors.active or self.colors.highlight
         self.chstrs[i]:set_str(0, self.lines[i], attr)
         self.chstrs[i]:set_str(#self.lines[i], ' ', attr, self.chstrs[i]:len() - #self.lines[i])
-        self._pad:mvaddchstr(i - 1 + 1, 0 + 1, self.chstrs[i])
+        self._pad:mvaddchstr(i - 1, 0, self.chstrs[i])
+        local scrolloff = 3
+        if i > self.scroll_y + (self.height - 2) - scrolloff then
+          self.scroll_y = i - (self.height - 2) + scrolloff
+        elseif i < self.scroll_y + scrolloff then
+          self.scroll_y = i - scrolloff
+        end
+        self.scroll_y = math.max(1, math.min(#self.lines, self.scroll_y))
       end
       self.selected = i
-      if self.selected then
-        if self.scroll_y + self.height - 1 < self.selected then
-          self.scroll_y = math.min(self.selected - (self.height - 1), #self.lines - self.height)
-        elseif self.scroll_y + 1 > self.selected then
-          self.scroll_y = self.selected - 1
-        end
-      end
       self:refresh()
       if self.on_select then
         self:on_select(self.selected)
       end
       return self.selected
     end,
-    scroll = function(self, delta)
-      if self.selected == nil then
-        return self:select(1)
+    scroll = function(self, dy, dx)
+      if self.selected ~= nil then
+        self:select(self.selected + (dy or 0))
+      else
+        self.scroll_y = math.max(1, math.min(self._height - self.height, self.scroll_y + (dy or 0)))
       end
-      return self:select(self.selected + delta)
+      self.scroll_x = math.max(1, math.min(self._width - self.width, self.scroll_x + (dx or 0)))
+      return self:refresh()
     end,
     refresh = function(self)
-      self._pad:border(C.ACS_VLINE, C.ACS_VLINE, C.ACS_HLINE, C.ACS_HLINE, C.ACS_ULCORNER, C.ACS_URCORNER, C.ACS_LLCORNER, C.ACS_LRCORNER)
+      self._frame:border(C.ACS_VLINE, C.ACS_VLINE, C.ACS_HLINE, C.ACS_HLINE, C.ACS_ULCORNER, C.ACS_URCORNER, C.ACS_LLCORNER, C.ACS_LRCORNER)
       if self.label then
-        self._pad:mvaddstr(0, math.floor((self.width - #self.label - 2) / 2), " " .. tostring(self.label) .. " ")
+        self._frame:mvaddstr(0, math.floor((self.width - #self.label - 2) / 2), " " .. tostring(self.label) .. " ")
       end
-      return self._pad:pnoutrefresh(self.scroll_y, self.scroll_x, self.y, self.x, self.y + self.height + 1, self.x + self.width)
+      self._frame:refresh()
+      local h, w = math.min(self.height - 2, self._height), math.min(self.width - 2, self._width)
+      return self._pad:pnoutrefresh(self.scroll_y - 1, self.scroll_x - 1, self.y + 1, self.x + 1, self.y + h, self.x + w)
     end,
     erase = function(self)
-      self._pad:erase()
-      return self._pad:pnoutrefresh(self.scroll_y, self.scroll_x, self.y, self.x, self.y + self.height, self.x + self.width)
+      self._frame:erase()
+      return self._frame:refresh()
     end,
-    clear = function(self)
-      self:erase()
-      self.lines = { }
-      self.chstrs = { }
-      self:set_internal_size(2, 2)
-      if self.resize_height then
-        self:set_size(self._height, self.width)
-      end
-      if self.resize_width then
-        self:set_size(self.height, self._width)
-      end
-      self.selected = nil
-      self.scroll_y, self.scroll_x = 0, 0
-      return self:refresh()
+    __gc = function(self)
+      self._frame:cancel()
+      return self._pad:cancel()
     end
   }
   _base_0.__index = _base_0
@@ -132,28 +129,29 @@ do
           __index = default_colors
         })
       end
-      self.scroll_y, self.scroll_x = 0, 0
+      self.scroll_y, self.scroll_x = 1, 1
       self.selected = nil
-      if self.width == AUTO then
-        self.width = 2
-        local _list_0 = self.lines
-        for _index_0 = 1, #_list_0 do
-          local x = _list_0[_index_0]
-          self.width = math.max(self.width, #x + 2)
-        end
-      end
-      self._width = self.width
+      self._height = #self.lines
       if self.height == AUTO then
-        self.height = #self.lines + 2
+        self.height = self._height + 2
       end
-      self._height = self.height
+      self._width = 0
+      local _list_0 = self.lines
+      for _index_0 = 1, #_list_0 do
+        local x = _list_0[_index_0]
+        self._width = math.max(self._width, #x + 2)
+      end
+      if self.width == AUTO then
+        self.width = self._width + 2
+      end
+      self._frame = C.newwin(self.height, self.width, self.y, self.x)
       self._pad = C.newpad(self._height, self._width)
       self._pad:scrollok(true)
       self:set_active(false)
       self.chstrs = { }
       for i, line in ipairs(self.lines) do
-        local attr = (i % 2 == 0) and self.colors.even_row or self.colors.odd_row
-        local chstr = C.new_chstr(self.width - 2)
+        local attr = self.colors.line_colors[i]
+        local chstr = C.new_chstr(self._width)
         self.chstrs[i] = chstr
         if #line >= chstr:len() then
           line = line:sub(1, chstr:len())
@@ -161,7 +159,7 @@ do
           line = line .. (" "):rep(chstr:len() - #line)
         end
         chstr:set_str(0, line, attr)
-        self._pad:mvaddchstr(i - 1 + 1, 0 + 1, chstr)
+        self._pad:mvaddchstr(i - 1, 0, chstr)
       end
       return self:refresh()
     end,
@@ -234,8 +232,11 @@ run_debugger = function(err_msg)
   default_colors = {
     active_frame = COLORS.BLUE,
     inactive_frame = COLORS.BROWN,
-    odd_row = COLORS.REGULAR,
-    even_row = COLORS.INVERTED,
+    line_colors = setmetatable({ }, {
+      __index = function(self, i)
+        return (i % 2 == 0 and COLORS.INVERTED or COLORS.REGULAR)
+      end
+    }),
     highlight = COLORS.WHITE_BG,
     active = COLORS.YELLOW_BG
   }
@@ -248,8 +249,11 @@ run_debugger = function(err_msg)
       err_msg_lines[i] = (" "):rep(math.floor((SCREEN_W - 2 - #line) / 2)) .. line
     end
     pads.err = Pad(0, 0, AUTO, SCREEN_W, err_msg_lines, "Error Message", {
-      even_row = COLORS.RED | C.A_BOLD,
-      odd_row = COLORS.RED | C.A_BOLD,
+      line_colors = setmetatable({ }, {
+        __index = function()
+          return COLORS.RED | C.A_BOLD
+        end
+      }),
       inactive_frame = COLORS.RED | C.A_DIM
     })
   end
@@ -303,29 +307,18 @@ run_debugger = function(err_msg)
   show_src = function(filename, line_no)
     local file = file_cache[filename]
     local src_lines = { }
-    local selected = nil
+    local err_line = nil
     if file then
       local i = 0
       for line in file:gmatch("[^\n]*") do
-        local _continue_0 = false
-        repeat
-          i = i + 1
-          if i < line_no - (pads.stack.height - 2) / 2 then
-            _continue_0 = true
-            break
-          end
-          table.insert(src_lines, line)
-          if i == line_no then
-            selected = #src_lines
-          end
-          if #src_lines >= pads.stack.height - 2 then
-            break
-          end
-          _continue_0 = true
-        until true
-        if not _continue_0 then
-          break
+        i = i + 1
+        table.insert(src_lines, line)
+        if i == line_no then
+          err_line = #src_lines
         end
+      end
+      while #src_lines < pads.stack.height do
+        table.insert(src_lines, "")
       end
     else
       table.insert(src_lines, "<no source code found>")
@@ -334,10 +327,15 @@ run_debugger = function(err_msg)
       pads.src:erase()
     end
     pads.src = Pad(pads.err.height, pads.stack.x + pads.stack.width, pads.stack.height, SCREEN_W - pads.stack.x - pads.stack.width - 0, src_lines, "(S)ource Code", {
-      highlight = COLORS.RED_BG,
-      inactive_frame = COLORS.GREEN | C.A_BOLD
+      line_colors = setmetatable({
+        [err_line] = COLORS.RED_BG
+      }, {
+        __index = function(self, i)
+          return (i % 2 == 0) and INVERTED or REGULAR
+        end
+      })
     })
-    return pads.src:select(selected)
+    return pads.src:select(err_line)
   end
   local show_vars
   show_vars = function(stack_index)
@@ -401,13 +399,21 @@ run_debugger = function(err_msg)
     local c = stdscr:getch()
     local _exp_0 = c
     if C.KEY_DOWN == _exp_0 or C.KEY_SF == _exp_0 or ("j"):byte() == _exp_0 then
-      selected_pad:scroll(1)
-    elseif C.KEY_UP == _exp_0 or C.KEY_SR == _exp_0 or ("k"):byte() == _exp_0 then
-      selected_pad:scroll(-1)
+      selected_pad:scroll(1, 0)
     elseif ('J'):byte() == _exp_0 then
-      selected_pad:scroll(10)
+      selected_pad:scroll(10, 0)
+    elseif C.KEY_UP == _exp_0 or C.KEY_SR == _exp_0 or ("k"):byte() == _exp_0 then
+      selected_pad:scroll(-1, 0)
     elseif ('K'):byte() == _exp_0 then
-      selected_pad:scroll(-10)
+      selected_pad:scroll(-10, 0)
+    elseif C.KEY_RIGHT == _exp_0 or ("l"):byte() == _exp_0 then
+      selected_pad:scroll(0, 1)
+    elseif ("L"):byte() == _exp_0 then
+      selected_pad:scroll(0, 10)
+    elseif C.KEY_LEFT == _exp_0 or ("h"):byte() == _exp_0 then
+      selected_pad:scroll(0, -1)
+    elseif ("H"):byte() == _exp_0 then
+      selected_pad:scroll(0, -10)
     elseif ('c'):byte() == _exp_0 then
       select_pad(pads.stack)
     elseif ('s'):byte() == _exp_0 then
