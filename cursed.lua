@@ -1,6 +1,6 @@
 local C = require("curses")
+local re = require('re')
 local repr = require('repr')
-local COLORS = { }
 local run_debugger, guard, stdscr
 local AUTO = { }
 local log = io.open("output.log", "w")
@@ -210,7 +210,6 @@ local line_tables = setmetatable({ }, {
   end
 })
 run_debugger = function(err_msg)
-  log:write(err_msg .. "\n\n")
   stdscr = C.initscr()
   SCREEN_H, SCREEN_W = stdscr:getmaxyx()
   C.cbreak()
@@ -219,62 +218,106 @@ run_debugger = function(err_msg)
   C.curs_set(0)
   C.start_color()
   C.use_default_colors()
-  local _
-  _, COLORS.REGULAR = C.init_pair(1, C.COLOR_WHITE, -1), C.color_pair(1)
-  _, COLORS.INVERTED = C.init_pair(2, C.COLOR_WHITE, C.COLOR_BLACK), C.color_pair(2)
-  _, COLORS.YELLOW_BG = C.init_pair(3, C.COLOR_BLACK, C.COLOR_YELLOW), C.color_pair(3)
-  _, COLORS.RED = C.init_pair(4, C.COLOR_RED, -1), C.color_pair(4)
-  _, COLORS.BLUE = C.init_pair(5, C.COLOR_BLUE, -1), C.color_pair(5) | C.A_BOLD
-  _, COLORS.WHITE = C.init_pair(6, C.COLOR_WHITE, -1), C.color_pair(6)
-  _, COLORS.WHITE_BG = C.init_pair(7, C.COLOR_BLACK, C.COLOR_WHITE), C.color_pair(7)
-  _, COLORS.BROWN = C.init_pair(8, C.COLOR_BLACK, -1), C.color_pair(8) | C.A_BOLD
-  _, COLORS.RED_BG = C.init_pair(9, C.COLOR_YELLOW, C.COLOR_RED), C.color_pair(9) | C.A_BOLD | C.A_DIM
-  _, COLORS.GREEN = C.init_pair(10, C.COLOR_GREEN, -1), C.color_pair(10)
+  local color_index = 0
+  local existing = { }
+  local make_color
+  make_color = function(fg, bg)
+    if fg == nil then
+      fg = -1
+    end
+    if bg == nil then
+      bg = -1
+    end
+    local key = tostring(fg) .. "," .. tostring(bg)
+    if not (existing[key]) then
+      color_index = color_index + 1
+      C.init_pair(color_index, fg, bg)
+      existing[key] = C.color_pair(color_index)
+    end
+    return existing[key]
+  end
+  local color_lang = re.compile([[        x <- {|
+            {:attrs: {| {attr} (" " {attr})* |} :}
+            / ((({:fg: color :} (" on " {:bg: color :})?) / {:bg: "on " color :}) {:attrs: {| (" " {attr})* |} :})
+        |}
+        attr <- "blink" / "bold" / "dim" / "invis" / "normal" / "protect" / "reverse" / "standout" / "underline"
+        color <- "black" / "blue" / "cyan" / "green" / "magenta" / "red" / "white" / "yellow" / "default"
+    ]])
+  C.COLOR_DEFAULT = -1
+  local color
+  color = function(s)
+    if s == nil then
+      s = "default"
+    end
+    local t = assert(color_lang:match(s), "Invalid color: " .. tostring(s))
+    if t.fg then
+      t.fg = C["COLOR_" .. t.fg:upper()]
+    end
+    if t.bg then
+      t.bg = C["COLOR_" .. t.bg:upper()]
+    end
+    local c = make_color(t.fg, t.bg)
+    local _list_0 = t.attrs
+    for _index_0 = 1, #_list_0 do
+      local a = _list_0[_index_0]
+      c = c | C["A_" .. a:upper()]
+    end
+    return c
+  end
   default_colors = {
-    active_frame = COLORS.BLUE,
-    inactive_frame = COLORS.BROWN,
+    active_frame = color("blue"),
+    inactive_frame = color("bold black"),
     line_colors = setmetatable({ }, {
       __index = function(self, i)
-        return (i % 2 == 0 and COLORS.INVERTED or COLORS.REGULAR)
+        return (i % 2 == 0 and color("on black") or color())
       end
     }),
-    highlight = COLORS.WHITE_BG,
-    active = COLORS.YELLOW_BG
+    highlight = color("black on white"),
+    active = color("black on yellow")
   }
   do
-    stdscr:wbkgd(COLORS.RED_BG)
+    stdscr:wbkgd(color("yellow on red bold"))
     stdscr:clear()
     stdscr:refresh()
     local lines = wrap_text("ERROR!\n \n " .. err_msg .. "\n \npress any key...", math.floor(SCREEN_W / 2))
+    local max_line = 0
+    for _index_0 = 1, #lines do
+      local line = lines[_index_0]
+      max_line = math.max(max_line, #line)
+    end
     for i, line in ipairs(lines) do
-      stdscr:mvaddstr(math.floor(SCREEN_H / 2 - #lines / 2) + i, math.floor((SCREEN_W - #line) / 2), line)
+      if i == 1 or i == #lines then
+        stdscr:mvaddstr(math.floor(SCREEN_H / 2 - #lines / 2) + i, math.floor((SCREEN_W - #line) / 2), line)
+      else
+        stdscr:mvaddstr(math.floor(SCREEN_H / 2 - #lines / 2) + i, math.floor((SCREEN_W - max_line) / 2), line)
+      end
     end
     stdscr:refresh()
     C.doupdate()
     stdscr:getch()
   end
-  stdscr:wbkgd(COLORS.REGULAR)
+  stdscr:wbkgd(color())
   stdscr:clear()
   stdscr:refresh()
   local pads = { }
   do
     local err_msg_lines = wrap_text(err_msg, SCREEN_W - 4)
     for i, line in ipairs(err_msg_lines) do
-      err_msg_lines[i] = (" "):rep(math.floor((SCREEN_W - 2 - #line) / 2)) .. line
+      err_msg_lines[i] = (" "):rep(2) .. line
     end
     pads.err = Pad(0, 0, AUTO, SCREEN_W, err_msg_lines, "Error Message", {
       line_colors = setmetatable({ }, {
         __index = function()
-          return COLORS.RED | C.A_BOLD
+          return color("red bold")
         end
       }),
-      inactive_frame = COLORS.RED | C.A_DIM
+      inactive_frame = color("red dim")
     })
   end
   local stack_locations = { }
   do
     local stack_names = { }
-    local max_filename = 0
+    local max_filename, max_fn_name = 0, 0
     local stack_min, stack_max = callstack_range()
     for i = stack_min, stack_max do
       local _continue_0 = false
@@ -303,6 +346,7 @@ run_debugger = function(err_msg)
         end
         table.insert(stack_locations, line)
         max_filename = math.max(max_filename, #line)
+        max_fn_name = math.max(max_fn_name, #stack_names[#stack_names])
         _continue_0 = true
       until true
       if not _continue_0 then
@@ -310,12 +354,12 @@ run_debugger = function(err_msg)
       end
     end
     local callstack = { }
+    local max_line = 0
     for i = 1, #stack_names do
-      callstack[i] = stack_locations[i] .. (" "):rep(max_filename - #stack_locations[i]) .. " | " .. stack_names[i] .. " "
+      callstack[i] = ("%-" .. max_fn_name .. "s | %s"):format(stack_names[i], stack_locations[i])
+      max_line = math.max(max_line, #callstack[i])
     end
-    pads.stack = Pad(pads.err.height, 0, math.max(#callstack + 2, 20), AUTO, callstack, "(C)allstack")
-    pads.stack:set_active(true)
-    pads.stack:refresh()
+    pads.stack = Pad(pads.err.height, SCREEN_W - (max_line + 2), math.max(#callstack + 2, 20), max_line + 2, callstack, "(C)allstack")
   end
   local show_src
   show_src = function(filename, line_no)
@@ -340,12 +384,12 @@ run_debugger = function(err_msg)
     if pads.src then
       pads.src:erase()
     end
-    pads.src = Pad(pads.err.height, pads.stack.x + pads.stack.width, pads.stack.height, SCREEN_W - pads.stack.x - pads.stack.width - 0, src_lines, "(S)ource Code", {
+    pads.src = Pad(pads.err.height, 0, pads.stack.height, pads.stack.x, src_lines, "(S)ource Code", {
       line_colors = setmetatable({
-        [err_line or -1] = COLORS.RED_BG
+        [err_line or -1] = color("yellow on red bold")
       }, {
         __index = function(self, i)
-          return (i % 2 == 0) and INVERTED or REGULAR
+          return (i % 2 == 0) and color("on black") or color()
         end
       })
     })
@@ -359,8 +403,7 @@ run_debugger = function(err_msg)
     if pads.values then
       pads.values:erase()
     end
-    local callstack_min
-    callstack_min, _ = callstack_range()
+    local callstack_min, _ = callstack_range()
     local var_names, values = { }, { }
     for loc = 1, 999 do
       local name, value = debug.getlocal(callstack_min + stack_index - 1, loc)
@@ -377,12 +420,13 @@ run_debugger = function(err_msg)
     end
     local var_y = pads.stack.y + pads.stack.height
     local var_x = 0
-    pads.vars = Pad(var_y, var_x, math.min(2 + #var_names, SCREEN_H - pads.err.height - pads.stack.height), AUTO, var_names, "(V)ars")
+    local height = SCREEN_H - (pads.err.height + pads.stack.height)
+    pads.vars = Pad(var_y, var_x, height, AUTO, var_names, "(V)ars")
     pads.vars.on_select = function(self, var_index)
       local value_x = pads.vars.x + pads.vars.width
       local value_w = SCREEN_W - (value_x)
       if var_index then
-        pads.values = Pad(var_y, value_x, pads.vars.height, value_w, wrap_text(values[var_index], value_w - 2), "Values")
+        pads.values = Pad(var_y, value_x, pads.vars.height, value_w, wrap_text(values[var_index], value_w - 2), "V(a)lue")
       else
         pads.values = Pad(var_y, value_x, pads.vars.height, value_w, values, "Values")
       end
@@ -392,24 +436,26 @@ run_debugger = function(err_msg)
     return pads.vars:select(1)
   end
   pads.stack.on_select = function(self, stack_index)
-    local filename, line_no = pads.stack.lines[stack_index]:match("([^:]*):(%d*).*")
+    local filename, line_no = pads.stack.lines[stack_index]:match("[^|]*| ([^:]*):(%d*).*")
     line_no = tonumber(line_no)
     show_src(filename, line_no)
     return show_vars(stack_index)
   end
   pads.stack:select(1)
-  pads.stack:set_active(true)
-  local selected_pad = pads.stack
+  local selected_pad = nil
   local select_pad
   select_pad = function(pad)
     if selected_pad ~= pad then
-      selected_pad:set_active(false)
-      selected_pad:refresh()
+      if selected_pad then
+        selected_pad:set_active(false)
+        selected_pad:refresh()
+      end
       selected_pad = pad
       selected_pad:set_active(true)
       return selected_pad:refresh()
     end
   end
+  select_pad(pads.src)
   while true do
     C.doupdate()
     local c = stdscr:getch()
@@ -436,9 +482,12 @@ run_debugger = function(err_msg)
       select_pad(pads.src)
     elseif ('v'):byte() == _exp_0 then
       select_pad(pads.vars)
+    elseif ('a'):byte() == _exp_0 then
+      select_pad(pads.values)
     elseif ('o'):byte() == _exp_0 then
       local file = stack_locations[pads.stack.selected]
       local filename, line_no = file:match("([^:]*):(.*)")
+      line_no = tostring(pads.src.selected)
       C.endwin()
       os.execute((os.getenv("EDITOR") or "nano") .. " +" .. line_no .. " " .. filename)
       stdscr = C.initscr()
@@ -464,7 +513,6 @@ end
 guard = function(fn, ...)
   local err_hand
   err_hand = function(err)
-    log:write(err .. "\n\n\n")
     C.endwin()
     print("Caught an error:")
     print(debug.traceback(err, 2))
@@ -478,7 +526,6 @@ local breakpoint
 breakpoint = function()
   local err_hand
   err_hand = function(err)
-    log:write(err .. "\n\n\n")
     C.endwin()
     print("Caught an error:")
     print(debug.traceback(err, 2))

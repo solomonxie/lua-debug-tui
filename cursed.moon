@@ -1,6 +1,6 @@
 C = require "curses"
+re = require 're'
 repr = require 'repr'
-COLORS = {}
 local run_debugger, guard, stdscr
 AUTO = {}
 log = io.open("output.log", "w")
@@ -154,7 +154,6 @@ line_tables = setmetatable({}, {__index:(filename)=>
 })
 
 run_debugger = (err_msg)->
-    log\write(err_msg.."\n\n")
     export stdscr, SCREEN_H, SCREEN_W
     stdscr = C.initscr!
     SCREEN_H, SCREEN_W = stdscr\getmaxyx!
@@ -166,37 +165,59 @@ run_debugger = (err_msg)->
     C.start_color!
     C.use_default_colors!
 
-    _, COLORS.REGULAR = C.init_pair(1, C.COLOR_WHITE, -1), C.color_pair(1)
-    _, COLORS.INVERTED = C.init_pair(2, C.COLOR_WHITE, C.COLOR_BLACK), C.color_pair(2)
-    _, COLORS.YELLOW_BG = C.init_pair(3, C.COLOR_BLACK, C.COLOR_YELLOW), C.color_pair(3)
-    _, COLORS.RED = C.init_pair(4, C.COLOR_RED, -1), C.color_pair(4)
-    _, COLORS.BLUE = C.init_pair(5, C.COLOR_BLUE, -1), C.color_pair(5) | C.A_BOLD
-    _, COLORS.WHITE = C.init_pair(6, C.COLOR_WHITE, -1), C.color_pair(6)
-    _, COLORS.WHITE_BG = C.init_pair(7, C.COLOR_BLACK, C.COLOR_WHITE), C.color_pair(7)
-    _, COLORS.BROWN = C.init_pair(8, C.COLOR_BLACK, -1), C.color_pair(8) | C.A_BOLD
-    _, COLORS.RED_BG = C.init_pair(9, C.COLOR_YELLOW, C.COLOR_RED), C.color_pair(9) | C.A_BOLD | C.A_DIM
-    _, COLORS.GREEN = C.init_pair(10, C.COLOR_GREEN, -1), C.color_pair(10)
+    color_index = 0
+    existing = {}
+    make_color = (fg=-1, bg=-1)->
+        key = "#{fg},#{bg}"
+        unless existing[key]
+            color_index += 1
+            C.init_pair(color_index, fg, bg)
+            existing[key] = C.color_pair(color_index)
+        return existing[key]
+    color_lang = re.compile[[
+        x <- {|
+            {:attrs: {| {attr} (" " {attr})* |} :}
+            / ((({:fg: color :} (" on " {:bg: color :})?) / {:bg: "on " color :}) {:attrs: {| (" " {attr})* |} :})
+        |}
+        attr <- "blink" / "bold" / "dim" / "invis" / "normal" / "protect" / "reverse" / "standout" / "underline"
+        color <- "black" / "blue" / "cyan" / "green" / "magenta" / "red" / "white" / "yellow" / "default"
+    ]]
+    C.COLOR_DEFAULT = -1
+    color = (s="default")->
+        t = assert(color_lang\match(s), "Invalid color: #{s}")
+        if t.fg then t.fg = C["COLOR_"..t.fg\upper!]
+        if t.bg then t.bg = C["COLOR_"..t.bg\upper!]
+        c = make_color(t.fg, t.bg)
+        for a in *t.attrs
+            c |= C["A_"..a\upper!]
+        return c
+
     export default_colors
     default_colors = {
-        active_frame: COLORS.BLUE,
-        inactive_frame: COLORS.BROWN,
-        line_colors: setmetatable({}, __index:(i)=> (i % 2 == 0 and COLORS.INVERTED or COLORS.REGULAR))
-        highlight: COLORS.WHITE_BG,
-        active: COLORS.YELLOW_BG,
+        active_frame: color"blue",
+        inactive_frame: color"bold black",
+        line_colors: setmetatable({}, __index:(i)=> (i % 2 == 0 and color("on black") or color()))
+        highlight: color"black on white",
+        active: color"black on yellow",
     }
 
     do -- Fullscreen flash
-        stdscr\wbkgd(COLORS.RED_BG)
+        stdscr\wbkgd(color"yellow on red bold")
         stdscr\clear!
         stdscr\refresh!
         lines = wrap_text("ERROR!\n \n "..err_msg.."\n \npress any key...", math.floor(SCREEN_W/2))
+        max_line = 0
+        for line in *lines do max_line = math.max(max_line, #line)
         for i, line in ipairs(lines)
-            stdscr\mvaddstr(math.floor(SCREEN_H/2 - #lines/2)+i, math.floor((SCREEN_W-#line)/2), line)
+            if i == 1 or i == #lines
+                stdscr\mvaddstr(math.floor(SCREEN_H/2 - #lines/2)+i, math.floor((SCREEN_W-#line)/2), line)
+            else
+                stdscr\mvaddstr(math.floor(SCREEN_H/2 - #lines/2)+i, math.floor((SCREEN_W-max_line)/2), line)
         stdscr\refresh!
         C.doupdate!
         stdscr\getch!
 
-    stdscr\wbkgd(COLORS.REGULAR)
+    stdscr\wbkgd(color!)
     stdscr\clear!
     stdscr\refresh!
 
@@ -205,16 +226,16 @@ run_debugger = (err_msg)->
     do -- Err pad
         err_msg_lines = wrap_text(err_msg, SCREEN_W - 4)
         for i,line in ipairs(err_msg_lines)
-            err_msg_lines[i] = (" ")\rep(math.floor((SCREEN_W-2-#line)/2))..line
+            err_msg_lines[i] = (" ")\rep(2)..line
         pads.err = Pad(0,0,AUTO,SCREEN_W, err_msg_lines, "Error Message", {
-            line_colors: setmetatable({}, __index:->COLORS.RED | C.A_BOLD)
-            inactive_frame: COLORS.RED | C.A_DIM
+            line_colors: setmetatable({}, __index:-> color"red bold")
+            inactive_frame: color"red dim"
         })
 
     stack_locations = {}
     do -- Stack pad
         stack_names = {}
-        max_filename = 0
+        max_filename, max_fn_name = 0, 0
         stack_min, stack_max = callstack_range!
         for i=stack_min,stack_max
             info = debug.getinfo(i)
@@ -233,13 +254,16 @@ run_debugger = (err_msg)->
                 info.short_src..":"..info.currentline
             table.insert(stack_locations, line)
             max_filename = math.max(max_filename, #line)
+            max_fn_name = math.max(max_fn_name, #stack_names[#stack_names])
         callstack = {}
+        max_line = 0
         for i=1,#stack_names do
-            callstack[i] = stack_locations[i]..(" ")\rep(max_filename-#stack_locations[i]).." | "..stack_names[i].." "
+            --callstack[i] = stack_locations[i]..(" ")\rep(max_filename-#stack_locations[i]).." | "..stack_names[i].." "
+            callstack[i] = ("%-"..max_fn_name.."s | %s")\format(stack_names[i], stack_locations[i])
+            --callstack[i] = stack_locations[i]..(" ")\rep(max_filename-#stack_locations[i]).." | "..stack_names[i].." "
+            max_line = math.max(max_line, #callstack[i])
 
-        pads.stack = Pad(pads.err.height,0,math.max(#callstack+2, 20),AUTO, callstack, "(C)allstack")
-        pads.stack\set_active(true)
-        pads.stack\refresh!
+        pads.stack = Pad(pads.err.height,SCREEN_W-(max_line+2),math.max(#callstack+2, 20),max_line+2, callstack, "(C)allstack")
     
     show_src = (filename, line_no)->
         file = file_cache[filename]
@@ -263,9 +287,10 @@ run_debugger = (err_msg)->
 
         if pads.src
             pads.src\erase!
-        pads.src = Pad(pads.err.height,pads.stack.x+pads.stack.width,
-            pads.stack.height,SCREEN_W-pads.stack.x-pads.stack.width-0, src_lines, "(S)ource Code", {
-                line_colors:setmetatable({[err_line or -1]:COLORS.RED_BG}, {__index:(i)=> (i % 2 == 0) and INVERTED or REGULAR})
+        pads.src = Pad(pads.err.height,0,
+            pads.stack.height,pads.stack.x, src_lines, "(S)ource Code", {
+                line_colors:setmetatable({[err_line or -1]: color"yellow on red bold"},
+                {__index:(i)=> (i % 2 == 0) and color"on black" or color!})
             })
         pads.src\select(err_line)
     
@@ -289,14 +314,16 @@ run_debugger = (err_msg)->
         
         var_y = pads.stack.y + pads.stack.height
         var_x = 0
-        pads.vars = Pad(var_y,var_x,math.min(2+#var_names, SCREEN_H-pads.err.height-pads.stack.height),AUTO,var_names,"(V)ars")
+        --height = math.min(2+#var_names, SCREEN_H-pads.err.height-pads.stack.height)
+        height = SCREEN_H-(pads.err.height+pads.stack.height)
+        pads.vars = Pad(var_y,var_x,height,AUTO,var_names,"(V)ars")
 
         pads.vars.on_select = (var_index)=>
             value_x = pads.vars.x+pads.vars.width
             value_w = SCREEN_W-(value_x)
             -- Show single value:
             if var_index
-                pads.values = Pad(var_y,value_x,pads.vars.height,value_w,wrap_text(values[var_index], value_w-2), "Values")
+                pads.values = Pad(var_y,value_x,pads.vars.height,value_w,wrap_text(values[var_index], value_w-2), "V(a)lue")
             else
                 pads.values = Pad(var_y,value_x,pads.vars.height,value_w,values, "Values")
             collectgarbage()
@@ -305,22 +332,24 @@ run_debugger = (err_msg)->
         pads.vars\select(1)
 
     pads.stack.on_select = (stack_index)=>
-        filename, line_no = pads.stack.lines[stack_index]\match("([^:]*):(%d*).*")
+        filename, line_no = pads.stack.lines[stack_index]\match("[^|]*| ([^:]*):(%d*).*")
         line_no = tonumber(line_no)
         show_src(filename, line_no)
         show_vars(stack_index)
 
     pads.stack\select(1)
-    pads.stack\set_active(true)
-    selected_pad = pads.stack
 
+    selected_pad = nil
     select_pad = (pad)->
         if selected_pad != pad
-            selected_pad\set_active(false)
-            selected_pad\refresh!
+            if selected_pad
+                selected_pad\set_active(false)
+                selected_pad\refresh!
             selected_pad = pad
             selected_pad\set_active(true)
             selected_pad\refresh!
+    
+    select_pad(pads.src)
 
     while true
         C.doupdate!
@@ -355,9 +384,13 @@ run_debugger = (err_msg)->
             when ('v')\byte!
                 select_pad(pads.vars) -- (V)ars
 
+            when ('a')\byte!
+                select_pad(pads.values) -- V(a)lue
+
             when ('o')\byte!
                 file = stack_locations[pads.stack.selected]
                 filename,line_no = file\match("([^:]*):(.*)")
+                line_no = tostring(pads.src.selected)
                 -- Launch system editor and then redraw everything
                 C.endwin!
                 os.execute((os.getenv("EDITOR") or "nano").." +"..line_no.." "..filename)
@@ -382,7 +415,6 @@ run_debugger = (err_msg)->
 
 guard = (fn, ...)->
     err_hand = (err)->
-        log\write(err.."\n\n\n")
         C.endwin!
         print "Caught an error:"
         print(debug.traceback(err, 2))
@@ -392,7 +424,6 @@ guard = (fn, ...)->
 
 breakpoint = ->
     err_hand = (err)->
-        log\write(err.."\n\n\n")
         C.endwin!
         print "Caught an error:"
         print(debug.traceback(err, 2))
