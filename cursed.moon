@@ -34,105 +34,158 @@ wrap_text = (text, width)->
             table.insert(lines, line)
     return lines
 
-default_colors = {
-}
 
 class Pad
-    new: (@y,@x,@height,@width,@lines,@label,@colors=default_colors)=>
-        if @colors and @colors != default_colors
-            setmetatable(@colors, __index:default_colors)
+    new: (@label,@y,@x,height,width,...)=>
         @scroll_y, @scroll_x = 1, 1
         @selected = nil
 
-        @_height = #@lines
+        @columns = {}
+        @column_widths = {}
+        @active_frame = color("blue bold")
+        @inactive_frame = color("blue dim")
+        @colors = {}
+        for i=1,select('#',...)-1,2
+            col = select(i, ...)
+            table.insert(@columns, col)
+            w = 0
+            for chunk in *col do w = math.max(w, #chunk)
+            table.insert(@column_widths, w)
+            color_fn = select(i+1,...) or ((i)=>color())
+            assert(type(color_fn) == 'function', "Invalid color function type: #{type color_fn}")
+            table.insert(@colors, color_fn)
+
+        @configure_size height, width
+        @_frame = C.newwin(@height, @width, @y, @x)
+        @_frame\immedok(true)
+        @_pad = C.newpad(@_height, @_width)
+        @_pad\scrollok(true)
+        @set_active false
+        @chstrs = {}
+        for i=1,#@columns[1]
+            @chstrs[i] = C.new_chstr(@_width)
+            @setup_chstr(i)
+        @dirty = true
+    
+    configure_size: (@height, @width)=>
+        @_height = #@columns[1]
         if @height == AUTO
             @height = @_height + 2
 
         @_width = 0
-        for x in *@lines do @_width = math.max(@_width, #x+2)
+        for i=1,#@columns[1]
+            row_len = #@columns - 1
+            for col in *@columns
+                row_len += #col[i]
+            @_width = math.max(@_width, row_len)
         if @width == AUTO
             @width = @_width + 2
 
-        @_frame = C.newwin(@height, @width, @y, @x)
-
-        @_pad = C.newpad(@_height, @_width)
-        @_pad\scrollok(true)
-        @set_active false
-
-        @chstrs = {}
-        for i, line in ipairs(@lines)
-            attr = @colors.line_colors[i]
-            chstr = C.new_chstr(@_width)
-            @chstrs[i] = chstr
-            if #line >= chstr\len!
-                line = line\sub(1, chstr\len!)
-            else
-                line ..= (" ")\rep(chstr\len!-#line)
-            chstr\set_str(0, line, attr)
-            @_pad\mvaddchstr(i-1,0,chstr)
-        @refresh!
+    setup_chstr: (i)=>
+        chstr = @chstrs[i]
+        x = 0
+        for c=1,#@columns
+            attr = @colors[c](@, i)
+            chunk = @columns[c][i]
+            chunk ..= (" ")\rep(@column_widths[c]-#chunk)
+            chstr\set_str(x, chunk, attr)
+            x += #chunk
+            if c < #@columns
+                chstr\set_ch(x, C.ACS_VLINE, @active and @active_frame or @inactive_frame)
+                x += 1
+        @_pad\mvaddchstr(i-1,0,chstr)
+        @dirty = true
     
     set_active: (active)=>
         return if active == @active
         @active = active
-        @_frame\attrset(active and @colors.active_frame or @colors.inactive_frame)
+        @_frame\attrset(active and @active_frame or @inactive_frame)
+        @dirty = true
     
     select: (i)=>
-        if #@lines == 0 then i = nil
+        if #@columns[1] == 0 then i = nil
         if i == @selected then return @selected
+        old_y, old_x = @scroll_y, @scroll_x
         if i != nil
-            i = math.max(1, math.min(#@lines, i))
-        if @selected
-            j = @selected
-            attr = @colors.line_colors[j]
-            @chstrs[j]\set_str(0, @lines[j], attr)
-            @chstrs[j]\set_str(#@lines[j], ' ', attr, @chstrs[j]\len!-#@lines[j])
-            @_pad\mvaddchstr(j-1,0,@chstrs[j])
+            i = math.max(1, math.min(#@columns[1], i))
+        
+        old_selected,@selected = @selected,i
 
-        if i
-            attr = @active and @colors.active or @colors.highlight
-            @chstrs[i]\set_str(0, @lines[i], attr)
-            @chstrs[i]\set_str(#@lines[i], ' ', attr, @chstrs[i]\len!-#@lines[i])
-            @_pad\mvaddchstr(i-1,0,@chstrs[i])
+        if old_selected
+            @setup_chstr(old_selected)
+
+        if @selected
+            @setup_chstr(@selected)
 
             scrolloff = 3
-            if i > @scroll_y + (@height-2) - scrolloff
-                @scroll_y = i - (@height-2) + scrolloff
-            elseif i < @scroll_y + scrolloff
-                @scroll_y = i - scrolloff
-            @scroll_y = math.max(1, math.min(#@lines, @scroll_y))
+            if @selected > @scroll_y + (@height-2) - scrolloff
+                @scroll_y = @selected - (@height-2) + scrolloff
+            elseif @selected < @scroll_y + scrolloff
+                @scroll_y = @selected - scrolloff
+            @scroll_y = math.max(1, math.min(#@columns[1], @scroll_y))
 
-        @selected = i
-        @refresh!
+        if @scroll_y == old_y
+            w = math.min(@width-2,@_width)
+            if old_selected and @scroll_y <= old_selected and old_selected <= @scroll_y + @height-2
+                @_pad\pnoutrefresh(old_selected-1,@scroll_x-1,@y+1+(old_selected-@scroll_y),@x+1,@y+1+(old_selected-@scroll_y)+1,@x+w)
+            if @selected and @scroll_y <= @selected and @selected <= @scroll_y + @height-2
+                @_pad\pnoutrefresh(@selected-1,@scroll_x-1,@y+1+(@selected-@scroll_y),@x+1,@y+1+(@selected-@scroll_y)+1,@x+w)
+        else
+            @dirty = true
+
         if @on_select then @on_select(@selected)
         return @selected
     
     scroll: (dy,dx)=>
+        old_y, old_x = @scroll_y, @scroll_x
         if @selected != nil
             @select(@selected + (dy or 0))
         else
             @scroll_y = math.max(1, math.min(@_height-@height, @scroll_y+(dy or 0)))
         @scroll_x = math.max(1, math.min(@_width-@width, @scroll_x+(dx or 0)))
-        @refresh!
+        if @scroll_y != old_y or @scroll_x != old_x
+            @dirty = true
     
-    refresh: =>
+    refresh: (force=false)=>
+        return if not force and not @dirty
+        @_frame\mvaddch(0,0,C.ACS_ULCORNER)
+        for y=1,@height-2 do @_frame\mvaddch(y,0,C.ACS_VLINE)
+        @_frame\mvaddch(@height-1,0,C.ACS_LLCORNER)
+        for x=1,@width-2 do @_frame\mvaddch(@height-1,x,C.ACS_HLINE)
+        @_frame\mvaddch(@height-1,@width-1,C.ACS_LRCORNER)
+        for y=1,@height-2 do @_frame\mvaddch(y,@width-1,C.ACS_VLINE)
+        @_frame\mvaddch(0,@width-1,C.ACS_URCORNER)
+        for x=1,@width-2 do @_frame\mvaddch(0,x,C.ACS_HLINE)
+        [[
         @_frame\border(C.ACS_VLINE, C.ACS_VLINE,
             C.ACS_HLINE, C.ACS_HLINE,
             C.ACS_ULCORNER, C.ACS_URCORNER,
             C.ACS_LLCORNER, C.ACS_LRCORNER)
+            ]]
         if @label
             @_frame\mvaddstr(0, math.floor((@width-#@label-2)/2), " #{@label} ")
         @_frame\refresh!
+        --@_frame\prefresh(0,0,@y,@x,@y+@height-1,@x+@width-1)
         h,w = math.min(@height-2,@_height),math.min(@width-2,@_width)
         @_pad\pnoutrefresh(@scroll_y-1,@scroll_x-1,@y+1,@x+1,@y+h,@x+w)
+        @dirty = false
     
     erase: =>
+        @dirty = true
         @_frame\erase!
         @_frame\refresh!
     
     __gc: =>
         @_frame\close!
         @_pad\close!
+
+class NumberedPad extends Pad
+    new: (@label,@y,@x,height,width,...)=>
+        col1 = select(1, ...)
+        fmt = "%#{#tostring(#col1)}d"
+        line_nums = [fmt\format(i) for i=1,#col1]
+        cols = {line_nums, ((i)=>color("yellow")), ...}
+        super @label, @y, @x, height, width, unpack(cols)
 
 ok, to_lua = pcall -> require('moonscript.base').to_lua
 if not ok then to_lua = -> nil
@@ -177,12 +230,15 @@ run_debugger = (err_msg)->
     color_lang = re.compile[[
         x <- {|
             {:attrs: {| {attr} (" " {attr})* |} :}
-            / ((({:fg: color :} (" on " {:bg: color :})?) / {:bg: "on " color :}) {:attrs: {| (" " {attr})* |} :})
+            / (
+                ({:bg: "on " {color} :} / ({:fg: color :} (" on " {:bg: color :})?))
+                {:attrs: {| (" " {attr})* |} :})
         |}
         attr <- "blink" / "bold" / "dim" / "invis" / "normal" / "protect" / "reverse" / "standout" / "underline"
         color <- "black" / "blue" / "cyan" / "green" / "magenta" / "red" / "white" / "yellow" / "default"
     ]]
     C.COLOR_DEFAULT = -1
+    export color
     color = (s="default")->
         t = assert(color_lang\match(s), "Invalid color: #{s}")
         if t.fg then t.fg = C["COLOR_"..t.fg\upper!]
@@ -191,15 +247,6 @@ run_debugger = (err_msg)->
         for a in *t.attrs
             c |= C["A_"..a\upper!]
         return c
-
-    export default_colors
-    default_colors = {
-        active_frame: color"blue",
-        inactive_frame: color"bold black",
-        line_colors: setmetatable({}, __index:(i)=> (i % 2 == 0 and color("on black") or color()))
-        highlight: color"black on white",
-        active: color"black on yellow",
-    }
 
     do -- Fullscreen flash
         stdscr\wbkgd(color"yellow on red bold")
@@ -227,10 +274,7 @@ run_debugger = (err_msg)->
         err_msg_lines = wrap_text(err_msg, SCREEN_W - 4)
         for i,line in ipairs(err_msg_lines)
             err_msg_lines[i] = (" ")\rep(2)..line
-        pads.err = Pad(0,0,AUTO,SCREEN_W, err_msg_lines, "Error Message", {
-            line_colors: setmetatable({}, __index:-> color"red bold")
-            inactive_frame: color"red dim"
-        })
+        pads.err = Pad("Error Message", 0,0,AUTO,SCREEN_W, err_msg_lines, (i)=> color("red bold"))
 
     stack_locations = {}
     do -- Stack pad
@@ -240,59 +284,56 @@ run_debugger = (err_msg)->
         for i=stack_min,stack_max
             info = debug.getinfo(i)
             if not info then break
-            table.insert(stack_names, info.name or "<unnamed function>")
-            if not info.short_src
-                continue
-            line_table = line_tables[info.short_src]
-            line = if line_table
-                char = line_table[info.currentline]
-                line_num = 1
-                file = file_cache[info.short_src]
-                for _ in file\sub(1,char)\gmatch("\n") do line_num += 1
-                "#{info.short_src}:#{line_num}"
+            fn_name = info.name or "<unnamed function>"
+            table.insert(stack_names, fn_name)
+            line = if info.short_src
+                line_table = line_tables[info.short_src]
+                if line_table
+                    char = line_table[info.currentline]
+                    line_num = 1
+                    file = file_cache[info.short_src]
+                    for _ in file\sub(1,char)\gmatch("\n") do line_num += 1
+                    "#{info.short_src}:#{line_num}"
+                else
+                    info.short_src..":"..info.currentline
             else
-                info.short_src..":"..info.currentline
+                "???"
             table.insert(stack_locations, line)
             max_filename = math.max(max_filename, #line)
-            max_fn_name = math.max(max_fn_name, #stack_names[#stack_names])
+            max_fn_name = math.max(max_fn_name, #fn_name)
         callstack = {}
         max_line = 0
         for i=1,#stack_names do
-            --callstack[i] = stack_locations[i]..(" ")\rep(max_filename-#stack_locations[i]).." | "..stack_names[i].." "
-            callstack[i] = ("%-"..max_fn_name.."s | %s")\format(stack_names[i], stack_locations[i])
-            --callstack[i] = stack_locations[i]..(" ")\rep(max_filename-#stack_locations[i]).." | "..stack_names[i].." "
-            max_line = math.max(max_line, #callstack[i])
+            fn_name = stack_names[i]
+            callstack[i] = {fn_name, stack_locations[i]}
+            max_line = math.max(max_line, #fn_name+#stack_locations[i]+3)
 
-        pads.stack = Pad(pads.err.height,SCREEN_W-(max_line+2),math.max(#callstack+2, 20),max_line+2, callstack, "(C)allstack")
+        stack_h = math.max(#callstack+2, math.floor(2/3*SCREEN_H))
+        pads.stack = Pad "(C)allstack",pads.err.height,SCREEN_W-(max_line+2),stack_h,max_line+2,
+            stack_names, ((i)=> (i == @selected) and color("black on green") or color("green")),
+            stack_locations, ((i)=> (i == @selected) and color("black on cyan") or color("cyan"))
     
     show_src = (filename, line_no)->
-        file = file_cache[filename]
-        src_lines = {}
-        err_line = nil
-        if file
-            i = 0
-            for line in file\gmatch("[^\n]*")
-                i += 1
-                --if i < line_no-(pads.stack.height-2)/2
-                --    continue
-                table.insert src_lines, line
-                if i == line_no
-                    err_line = #src_lines
-                --if #src_lines >= pads.stack.height-2
-                --    break
-            while #src_lines < pads.stack.height
-                table.insert(src_lines, "")
-        else
-            table.insert(src_lines, "<no source code found>")
-
         if pads.src
             pads.src\erase!
-        pads.src = Pad(pads.err.height,0,
-            pads.stack.height,pads.stack.x, src_lines, "(S)ource Code", {
-                line_colors:setmetatable({[err_line or -1]: color"yellow on red bold"},
-                {__index:(i)=> (i % 2 == 0) and color"on black" or color!})
-            })
-        pads.src\select(err_line)
+        file = file_cache[filename]
+        if file
+            src_lines = {}
+            for line in (file..'\n')\gmatch("([^\n]*)\n")
+                table.insert src_lines, line
+            pads.src = NumberedPad "(S)ource Code", pads.err.height,0,
+                pads.stack.height,pads.stack.x, src_lines, (i)=>
+                    if i == @selected then return color("black on white")
+                    elseif i == line_no then return color("yellow on red bold")
+                    return color("white bold")
+            pads.src\select(line_no)
+        else
+            lines = {}
+            for i=1,math.floor(pads.stack.height/2)-1 do table.insert(lines, "")
+            s = "<no source code found>"
+            s = (" ")\rep(math.floor((pads.stack.x-2-#s)/2))..s
+            table.insert(lines, s)
+            pads.src = Pad "(S)ource Code", pads.err.height,0,pads.stack.height,pads.stack.x,lines, ->color("red")
     
     show_vars = (stack_index)->
         if pads.vars
@@ -316,23 +357,24 @@ run_debugger = (err_msg)->
         var_x = 0
         --height = math.min(2+#var_names, SCREEN_H-pads.err.height-pads.stack.height)
         height = SCREEN_H-(pads.err.height+pads.stack.height)
-        pads.vars = Pad(var_y,var_x,height,AUTO,var_names,"(V)ars")
+        pads.vars = Pad "(V)ars", var_y,var_x,height,AUTO,var_names, (i)=> color()
 
         pads.vars.on_select = (var_index)=>
             value_x = pads.vars.x+pads.vars.width
             value_w = SCREEN_W-(value_x)
             -- Show single value:
             if var_index
-                pads.values = Pad(var_y,value_x,pads.vars.height,value_w,wrap_text(values[var_index], value_w-2), "V(a)lue")
+                pads.values = Pad "V(a)lue",var_y,value_x,pads.vars.height,value_w,wrap_text(values[var_index], value_w-2), (i)=>color()
             else
-                pads.values = Pad(var_y,value_x,pads.vars.height,value_w,values, "Values")
+                pads.values = Pad "V(a)lue",var_y,value_x,pads.vars.height,value_w,values, (i)=>color()
             collectgarbage()
             collectgarbage()
 
         pads.vars\select(1)
 
     pads.stack.on_select = (stack_index)=>
-        filename, line_no = pads.stack.lines[stack_index]\match("[^|]*| ([^:]*):(%d*).*")
+        filename = pads.stack.columns[2][stack_index]\match("([^:]*):.*")
+        --filename, line_no = pads.stack.lines[stack_index]\match("[^|]*| ([^:]*):(%d*).*")
         line_no = tonumber(line_no)
         show_src(filename, line_no)
         show_vars(stack_index)
@@ -352,6 +394,9 @@ run_debugger = (err_msg)->
     select_pad(pads.src)
 
     while true
+        for _,p in pairs(pads)
+            if p.dirty
+                p\refresh!
         C.doupdate!
         c = stdscr\getch!
         switch c

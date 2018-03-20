@@ -41,74 +41,147 @@ wrap_text = function(text, width)
   end
   return lines
 end
-local default_colors = { }
 local Pad
 do
   local _class_0
   local _base_0 = {
+    configure_size = function(self, height, width)
+      self.height, self.width = height, width
+      self._height = #self.columns[1]
+      if self.height == AUTO then
+        self.height = self._height + 2
+      end
+      self._width = 0
+      for i = 1, #self.columns[1] do
+        local row_len = #self.columns - 1
+        local _list_0 = self.columns
+        for _index_0 = 1, #_list_0 do
+          local col = _list_0[_index_0]
+          row_len = row_len + #col[i]
+        end
+        self._width = math.max(self._width, row_len)
+      end
+      if self.width == AUTO then
+        self.width = self._width + 2
+      end
+    end,
+    setup_chstr = function(self, i)
+      local chstr = self.chstrs[i]
+      local x = 0
+      for c = 1, #self.columns do
+        local attr = self.colors[c](self, i)
+        local chunk = self.columns[c][i]
+        chunk = chunk .. (" "):rep(self.column_widths[c] - #chunk)
+        chstr:set_str(x, chunk, attr)
+        x = x + #chunk
+        if c < #self.columns then
+          chstr:set_ch(x, C.ACS_VLINE, self.active and self.active_frame or self.inactive_frame)
+          x = x + 1
+        end
+      end
+      self._pad:mvaddchstr(i - 1, 0, chstr)
+      self.dirty = true
+    end,
     set_active = function(self, active)
       if active == self.active then
         return 
       end
       self.active = active
-      return self._frame:attrset(active and self.colors.active_frame or self.colors.inactive_frame)
+      self._frame:attrset(active and self.active_frame or self.inactive_frame)
+      self.dirty = true
     end,
     select = function(self, i)
-      if #self.lines == 0 then
+      if #self.columns[1] == 0 then
         i = nil
       end
       if i == self.selected then
         return self.selected
       end
+      local old_y, old_x = self.scroll_y, self.scroll_x
       if i ~= nil then
-        i = math.max(1, math.min(#self.lines, i))
+        i = math.max(1, math.min(#self.columns[1], i))
+      end
+      local old_selected
+      old_selected, self.selected = self.selected, i
+      if old_selected then
+        self:setup_chstr(old_selected)
       end
       if self.selected then
-        local j = self.selected
-        local attr = self.colors.line_colors[j]
-        self.chstrs[j]:set_str(0, self.lines[j], attr)
-        self.chstrs[j]:set_str(#self.lines[j], ' ', attr, self.chstrs[j]:len() - #self.lines[j])
-        self._pad:mvaddchstr(j - 1, 0, self.chstrs[j])
-      end
-      if i then
-        local attr = self.active and self.colors.active or self.colors.highlight
-        self.chstrs[i]:set_str(0, self.lines[i], attr)
-        self.chstrs[i]:set_str(#self.lines[i], ' ', attr, self.chstrs[i]:len() - #self.lines[i])
-        self._pad:mvaddchstr(i - 1, 0, self.chstrs[i])
+        self:setup_chstr(self.selected)
         local scrolloff = 3
-        if i > self.scroll_y + (self.height - 2) - scrolloff then
-          self.scroll_y = i - (self.height - 2) + scrolloff
-        elseif i < self.scroll_y + scrolloff then
-          self.scroll_y = i - scrolloff
+        if self.selected > self.scroll_y + (self.height - 2) - scrolloff then
+          self.scroll_y = self.selected - (self.height - 2) + scrolloff
+        elseif self.selected < self.scroll_y + scrolloff then
+          self.scroll_y = self.selected - scrolloff
         end
-        self.scroll_y = math.max(1, math.min(#self.lines, self.scroll_y))
+        self.scroll_y = math.max(1, math.min(#self.columns[1], self.scroll_y))
       end
-      self.selected = i
-      self:refresh()
+      if self.scroll_y == old_y then
+        local w = math.min(self.width - 2, self._width)
+        if old_selected and self.scroll_y <= old_selected and old_selected <= self.scroll_y + self.height - 2 then
+          self._pad:pnoutrefresh(old_selected - 1, self.scroll_x - 1, self.y + 1 + (old_selected - self.scroll_y), self.x + 1, self.y + 1 + (old_selected - self.scroll_y) + 1, self.x + w)
+        end
+        if self.selected and self.scroll_y <= self.selected and self.selected <= self.scroll_y + self.height - 2 then
+          self._pad:pnoutrefresh(self.selected - 1, self.scroll_x - 1, self.y + 1 + (self.selected - self.scroll_y), self.x + 1, self.y + 1 + (self.selected - self.scroll_y) + 1, self.x + w)
+        end
+      else
+        self.dirty = true
+      end
       if self.on_select then
         self:on_select(self.selected)
       end
       return self.selected
     end,
     scroll = function(self, dy, dx)
+      local old_y, old_x = self.scroll_y, self.scroll_x
       if self.selected ~= nil then
         self:select(self.selected + (dy or 0))
       else
         self.scroll_y = math.max(1, math.min(self._height - self.height, self.scroll_y + (dy or 0)))
       end
       self.scroll_x = math.max(1, math.min(self._width - self.width, self.scroll_x + (dx or 0)))
-      return self:refresh()
+      if self.scroll_y ~= old_y or self.scroll_x ~= old_x then
+        self.dirty = true
+      end
     end,
-    refresh = function(self)
-      self._frame:border(C.ACS_VLINE, C.ACS_VLINE, C.ACS_HLINE, C.ACS_HLINE, C.ACS_ULCORNER, C.ACS_URCORNER, C.ACS_LLCORNER, C.ACS_LRCORNER)
+    refresh = function(self, force)
+      if force == nil then
+        force = false
+      end
+      if not force and not self.dirty then
+        return 
+      end
+      self._frame:mvaddch(0, 0, C.ACS_ULCORNER)
+      for y = 1, self.height - 2 do
+        self._frame:mvaddch(y, 0, C.ACS_VLINE)
+      end
+      self._frame:mvaddch(self.height - 1, 0, C.ACS_LLCORNER)
+      for x = 1, self.width - 2 do
+        self._frame:mvaddch(self.height - 1, x, C.ACS_HLINE)
+      end
+      self._frame:mvaddch(self.height - 1, self.width - 1, C.ACS_LRCORNER)
+      for y = 1, self.height - 2 do
+        self._frame:mvaddch(y, self.width - 1, C.ACS_VLINE)
+      end
+      self._frame:mvaddch(0, self.width - 1, C.ACS_URCORNER)
+      for x = 1, self.width - 2 do
+        self._frame:mvaddch(0, x, C.ACS_HLINE)
+      end
+      local _ = [[        @_frame\border(C.ACS_VLINE, C.ACS_VLINE,
+            C.ACS_HLINE, C.ACS_HLINE,
+            C.ACS_ULCORNER, C.ACS_URCORNER,
+            C.ACS_LLCORNER, C.ACS_LRCORNER)
+            ]]
       if self.label then
         self._frame:mvaddstr(0, math.floor((self.width - #self.label - 2) / 2), " " .. tostring(self.label) .. " ")
       end
       self._frame:refresh()
       local h, w = math.min(self.height - 2, self._height), math.min(self.width - 2, self._width)
-      return self._pad:pnoutrefresh(self.scroll_y - 1, self.scroll_x - 1, self.y + 1, self.x + 1, self.y + h, self.x + w)
+      self._pad:pnoutrefresh(self.scroll_y - 1, self.scroll_x - 1, self.y + 1, self.x + 1, self.y + h, self.x + w)
+      self.dirty = false
     end,
     erase = function(self)
+      self.dirty = true
       self._frame:erase()
       return self._frame:refresh()
     end,
@@ -119,49 +192,42 @@ do
   }
   _base_0.__index = _base_0
   _class_0 = setmetatable({
-    __init = function(self, y, x, height, width, lines, label, colors)
-      if colors == nil then
-        colors = default_colors
-      end
-      self.y, self.x, self.height, self.width, self.lines, self.label, self.colors = y, x, height, width, lines, label, colors
-      if self.colors and self.colors ~= default_colors then
-        setmetatable(self.colors, {
-          __index = default_colors
-        })
-      end
+    __init = function(self, label, y, x, height, width, ...)
+      self.label, self.y, self.x = label, y, x
       self.scroll_y, self.scroll_x = 1, 1
       self.selected = nil
-      self._height = #self.lines
-      if self.height == AUTO then
-        self.height = self._height + 2
+      self.columns = { }
+      self.column_widths = { }
+      self.active_frame = color("blue bold")
+      self.inactive_frame = color("blue dim")
+      self.colors = { }
+      for i = 1, select('#', ...) - 1, 2 do
+        local col = select(i, ...)
+        table.insert(self.columns, col)
+        local w = 0
+        for _index_0 = 1, #col do
+          local chunk = col[_index_0]
+          w = math.max(w, #chunk)
+        end
+        table.insert(self.column_widths, w)
+        local color_fn = select(i + 1, ...) or (function(self, i)
+          return color()
+        end)
+        assert(type(color_fn) == 'function', "Invalid color function type: " .. tostring(type(color_fn)))
+        table.insert(self.colors, color_fn)
       end
-      self._width = 0
-      local _list_0 = self.lines
-      for _index_0 = 1, #_list_0 do
-        local x = _list_0[_index_0]
-        self._width = math.max(self._width, #x + 2)
-      end
-      if self.width == AUTO then
-        self.width = self._width + 2
-      end
+      self:configure_size(height, width)
       self._frame = C.newwin(self.height, self.width, self.y, self.x)
+      self._frame:immedok(true)
       self._pad = C.newpad(self._height, self._width)
       self._pad:scrollok(true)
       self:set_active(false)
       self.chstrs = { }
-      for i, line in ipairs(self.lines) do
-        local attr = self.colors.line_colors[i]
-        local chstr = C.new_chstr(self._width)
-        self.chstrs[i] = chstr
-        if #line >= chstr:len() then
-          line = line:sub(1, chstr:len())
-        else
-          line = line .. (" "):rep(chstr:len() - #line)
-        end
-        chstr:set_str(0, line, attr)
-        self._pad:mvaddchstr(i - 1, 0, chstr)
+      for i = 1, #self.columns[1] do
+        self.chstrs[i] = C.new_chstr(self._width)
+        self:setup_chstr(i)
       end
-      return self:refresh()
+      self.dirty = true
     end,
     __base = _base_0,
     __name = "Pad"
@@ -175,6 +241,64 @@ do
   })
   _base_0.__class = _class_0
   Pad = _class_0
+end
+local NumberedPad
+do
+  local _class_0
+  local _parent_0 = Pad
+  local _base_0 = { }
+  _base_0.__index = _base_0
+  setmetatable(_base_0, _parent_0.__base)
+  _class_0 = setmetatable({
+    __init = function(self, label, y, x, height, width, ...)
+      self.label, self.y, self.x = label, y, x
+      local col1 = select(1, ...)
+      local fmt = "%" .. tostring(#tostring(#col1)) .. "d"
+      local line_nums
+      do
+        local _accum_0 = { }
+        local _len_0 = 1
+        for i = 1, #col1 do
+          _accum_0[_len_0] = fmt:format(i)
+          _len_0 = _len_0 + 1
+        end
+        line_nums = _accum_0
+      end
+      local cols = {
+        line_nums,
+        (function(self, i)
+          return color("yellow")
+        end),
+        ...
+      }
+      return _class_0.__parent.__init(self, self.label, self.y, self.x, height, width, unpack(cols))
+    end,
+    __base = _base_0,
+    __name = "NumberedPad",
+    __parent = _parent_0
+  }, {
+    __index = function(cls, name)
+      local val = rawget(_base_0, name)
+      if val == nil then
+        local parent = rawget(cls, "__parent")
+        if parent then
+          return parent[name]
+        end
+      else
+        return val
+      end
+    end,
+    __call = function(cls, ...)
+      local _self_0 = setmetatable({}, _base_0)
+      cls.__init(_self_0, ...)
+      return _self_0
+    end
+  })
+  _base_0.__class = _class_0
+  if _parent_0.__inherited then
+    _parent_0.__inherited(_parent_0, _class_0)
+  end
+  NumberedPad = _class_0
 end
 local ok, to_lua = pcall(function()
   return require('moonscript.base').to_lua
@@ -238,13 +362,14 @@ run_debugger = function(err_msg)
   end
   local color_lang = re.compile([[        x <- {|
             {:attrs: {| {attr} (" " {attr})* |} :}
-            / ((({:fg: color :} (" on " {:bg: color :})?) / {:bg: "on " color :}) {:attrs: {| (" " {attr})* |} :})
+            / (
+                ({:bg: "on " {color} :} / ({:fg: color :} (" on " {:bg: color :})?))
+                {:attrs: {| (" " {attr})* |} :})
         |}
         attr <- "blink" / "bold" / "dim" / "invis" / "normal" / "protect" / "reverse" / "standout" / "underline"
         color <- "black" / "blue" / "cyan" / "green" / "magenta" / "red" / "white" / "yellow" / "default"
     ]])
   C.COLOR_DEFAULT = -1
-  local color
   color = function(s)
     if s == nil then
       s = "default"
@@ -264,17 +389,6 @@ run_debugger = function(err_msg)
     end
     return c
   end
-  default_colors = {
-    active_frame = color("blue"),
-    inactive_frame = color("bold black"),
-    line_colors = setmetatable({ }, {
-      __index = function(self, i)
-        return (i % 2 == 0 and color("on black") or color())
-      end
-    }),
-    highlight = color("black on white"),
-    active = color("black on yellow")
-  }
   do
     stdscr:wbkgd(color("yellow on red bold"))
     stdscr:clear()
@@ -305,14 +419,9 @@ run_debugger = function(err_msg)
     for i, line in ipairs(err_msg_lines) do
       err_msg_lines[i] = (" "):rep(2) .. line
     end
-    pads.err = Pad(0, 0, AUTO, SCREEN_W, err_msg_lines, "Error Message", {
-      line_colors = setmetatable({ }, {
-        __index = function()
-          return color("red bold")
-        end
-      }),
-      inactive_frame = color("red dim")
-    })
+    pads.err = Pad("Error Message", 0, 0, AUTO, SCREEN_W, err_msg_lines, function(self, i)
+      return color("red bold")
+    end)
   end
   local stack_locations = { }
   do
@@ -320,19 +429,15 @@ run_debugger = function(err_msg)
     local max_filename, max_fn_name = 0, 0
     local stack_min, stack_max = callstack_range()
     for i = stack_min, stack_max do
-      local _continue_0 = false
-      repeat
-        local info = debug.getinfo(i)
-        if not info then
-          break
-        end
-        table.insert(stack_names, info.name or "<unnamed function>")
-        if not info.short_src then
-          _continue_0 = true
-          break
-        end
+      local info = debug.getinfo(i)
+      if not info then
+        break
+      end
+      local fn_name = info.name or "<unnamed function>"
+      table.insert(stack_names, fn_name)
+      local line
+      if info.short_src then
         local line_table = line_tables[info.short_src]
-        local line
         if line_table then
           local char = line_table[info.currentline]
           local line_num = 1
@@ -344,56 +449,62 @@ run_debugger = function(err_msg)
         else
           line = info.short_src .. ":" .. info.currentline
         end
-        table.insert(stack_locations, line)
-        max_filename = math.max(max_filename, #line)
-        max_fn_name = math.max(max_fn_name, #stack_names[#stack_names])
-        _continue_0 = true
-      until true
-      if not _continue_0 then
-        break
+      else
+        line = "???"
       end
+      table.insert(stack_locations, line)
+      max_filename = math.max(max_filename, #line)
+      max_fn_name = math.max(max_fn_name, #fn_name)
     end
     local callstack = { }
     local max_line = 0
     for i = 1, #stack_names do
-      callstack[i] = ("%-" .. max_fn_name .. "s | %s"):format(stack_names[i], stack_locations[i])
-      max_line = math.max(max_line, #callstack[i])
+      local fn_name = stack_names[i]
+      callstack[i] = {
+        fn_name,
+        stack_locations[i]
+      }
+      max_line = math.max(max_line, #fn_name + #stack_locations[i] + 3)
     end
-    pads.stack = Pad(pads.err.height, SCREEN_W - (max_line + 2), math.max(#callstack + 2, 20), max_line + 2, callstack, "(C)allstack")
+    local stack_h = math.max(#callstack + 2, math.floor(2 / 3 * SCREEN_H))
+    pads.stack = Pad("(C)allstack", pads.err.height, SCREEN_W - (max_line + 2), stack_h, max_line + 2, stack_names, (function(self, i)
+      return (i == self.selected) and color("black on green") or color("green")
+    end), stack_locations, (function(self, i)
+      return (i == self.selected) and color("black on cyan") or color("cyan")
+    end))
   end
   local show_src
   show_src = function(filename, line_no)
-    local file = file_cache[filename]
-    local src_lines = { }
-    local err_line = nil
-    if file then
-      local i = 0
-      for line in file:gmatch("[^\n]*") do
-        i = i + 1
-        table.insert(src_lines, line)
-        if i == line_no then
-          err_line = #src_lines
-        end
-      end
-      while #src_lines < pads.stack.height do
-        table.insert(src_lines, "")
-      end
-    else
-      table.insert(src_lines, "<no source code found>")
-    end
     if pads.src then
       pads.src:erase()
     end
-    pads.src = Pad(pads.err.height, 0, pads.stack.height, pads.stack.x, src_lines, "(S)ource Code", {
-      line_colors = setmetatable({
-        [err_line or -1] = color("yellow on red bold")
-      }, {
-        __index = function(self, i)
-          return (i % 2 == 0) and color("on black") or color()
+    local file = file_cache[filename]
+    if file then
+      local src_lines = { }
+      for line in (file .. '\n'):gmatch("([^\n]*)\n") do
+        table.insert(src_lines, line)
+      end
+      pads.src = NumberedPad("(S)ource Code", pads.err.height, 0, pads.stack.height, pads.stack.x, src_lines, function(self, i)
+        if i == self.selected then
+          return color("black on white")
+        elseif i == line_no then
+          return color("yellow on red bold")
         end
-      })
-    })
-    return pads.src:select(err_line)
+        return color("white bold")
+      end)
+      return pads.src:select(line_no)
+    else
+      local lines = { }
+      for i = 1, math.floor(pads.stack.height / 2) - 1 do
+        table.insert(lines, "")
+      end
+      local s = "<no source code found>"
+      s = (" "):rep(math.floor((pads.stack.x - 2 - #s) / 2)) .. s
+      table.insert(lines, s)
+      pads.src = Pad("(S)ource Code", pads.err.height, 0, pads.stack.height, pads.stack.x, lines, function()
+        return color("red")
+      end)
+    end
   end
   local show_vars
   show_vars = function(stack_index)
@@ -421,14 +532,20 @@ run_debugger = function(err_msg)
     local var_y = pads.stack.y + pads.stack.height
     local var_x = 0
     local height = SCREEN_H - (pads.err.height + pads.stack.height)
-    pads.vars = Pad(var_y, var_x, height, AUTO, var_names, "(V)ars")
+    pads.vars = Pad("(V)ars", var_y, var_x, height, AUTO, var_names, function(self, i)
+      return color()
+    end)
     pads.vars.on_select = function(self, var_index)
       local value_x = pads.vars.x + pads.vars.width
       local value_w = SCREEN_W - (value_x)
       if var_index then
-        pads.values = Pad(var_y, value_x, pads.vars.height, value_w, wrap_text(values[var_index], value_w - 2), "V(a)lue")
+        pads.values = Pad("V(a)lue", var_y, value_x, pads.vars.height, value_w, wrap_text(values[var_index], value_w - 2), function(self, i)
+          return color()
+        end)
       else
-        pads.values = Pad(var_y, value_x, pads.vars.height, value_w, values, "Values")
+        pads.values = Pad("V(a)lue", var_y, value_x, pads.vars.height, value_w, values, function(self, i)
+          return color()
+        end)
       end
       collectgarbage()
       return collectgarbage()
@@ -436,8 +553,8 @@ run_debugger = function(err_msg)
     return pads.vars:select(1)
   end
   pads.stack.on_select = function(self, stack_index)
-    local filename, line_no = pads.stack.lines[stack_index]:match("[^|]*| ([^:]*):(%d*).*")
-    line_no = tonumber(line_no)
+    local filename = pads.stack.columns[2][stack_index]:match("([^:]*):.*")
+    local line_no = tonumber(line_no)
     show_src(filename, line_no)
     return show_vars(stack_index)
   end
@@ -457,6 +574,11 @@ run_debugger = function(err_msg)
   end
   select_pad(pads.src)
   while true do
+    for _, p in pairs(pads) do
+      if p.dirty then
+        p:refresh()
+      end
+    end
     C.doupdate()
     local c = stdscr:getch()
     local _exp_0 = c
