@@ -87,9 +87,11 @@ class Pad
         for c=1,#@columns
             attr = @colors[c](@, i)
             chunk = @columns[c][i]
-            chunk ..= (" ")\rep(@column_widths[c]-#chunk)
             chstr\set_str(x, chunk, attr)
             x += #chunk
+            if #chunk < @column_widths[c]
+                chstr\set_str(x, " ", attr, @column_widths[c]-#chunk)
+                x += @column_widths[c]-#chunk
             if c < #@columns
                 chstr\set_ch(x, C.ACS_VLINE, @active and @active_frame or @inactive_frame)
                 x += 1
@@ -148,20 +150,10 @@ class Pad
     
     refresh: (force=false)=>
         return if not force and not @dirty
-        @_frame\mvaddch(0,0,C.ACS_ULCORNER)
-        for y=1,@height-2 do @_frame\mvaddch(y,0,C.ACS_VLINE)
-        @_frame\mvaddch(@height-1,0,C.ACS_LLCORNER)
-        for x=1,@width-2 do @_frame\mvaddch(@height-1,x,C.ACS_HLINE)
-        @_frame\mvaddch(@height-1,@width-1,C.ACS_LRCORNER)
-        for y=1,@height-2 do @_frame\mvaddch(y,@width-1,C.ACS_VLINE)
-        @_frame\mvaddch(0,@width-1,C.ACS_URCORNER)
-        for x=1,@width-2 do @_frame\mvaddch(0,x,C.ACS_HLINE)
-        [[
         @_frame\border(C.ACS_VLINE, C.ACS_VLINE,
             C.ACS_HLINE, C.ACS_HLINE,
             C.ACS_ULCORNER, C.ACS_URCORNER,
             C.ACS_LLCORNER, C.ACS_LRCORNER)
-            ]]
         if @label
             @_frame\mvaddstr(0, math.floor((@width-#@label-2)/2), " #{@label} ")
         @_frame\refresh!

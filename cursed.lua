@@ -71,9 +71,12 @@ do
       for c = 1, #self.columns do
         local attr = self.colors[c](self, i)
         local chunk = self.columns[c][i]
-        chunk = chunk .. (" "):rep(self.column_widths[c] - #chunk)
         chstr:set_str(x, chunk, attr)
         x = x + #chunk
+        if #chunk < self.column_widths[c] then
+          chstr:set_str(x, " ", attr, self.column_widths[c] - #chunk)
+          x = x + (self.column_widths[c] - #chunk)
+        end
         if c < #self.columns then
           chstr:set_ch(x, C.ACS_VLINE, self.active and self.active_frame or self.inactive_frame)
           x = x + 1
@@ -151,27 +154,7 @@ do
       if not force and not self.dirty then
         return 
       end
-      self._frame:mvaddch(0, 0, C.ACS_ULCORNER)
-      for y = 1, self.height - 2 do
-        self._frame:mvaddch(y, 0, C.ACS_VLINE)
-      end
-      self._frame:mvaddch(self.height - 1, 0, C.ACS_LLCORNER)
-      for x = 1, self.width - 2 do
-        self._frame:mvaddch(self.height - 1, x, C.ACS_HLINE)
-      end
-      self._frame:mvaddch(self.height - 1, self.width - 1, C.ACS_LRCORNER)
-      for y = 1, self.height - 2 do
-        self._frame:mvaddch(y, self.width - 1, C.ACS_VLINE)
-      end
-      self._frame:mvaddch(0, self.width - 1, C.ACS_URCORNER)
-      for x = 1, self.width - 2 do
-        self._frame:mvaddch(0, x, C.ACS_HLINE)
-      end
-      local _ = [[        @_frame\border(C.ACS_VLINE, C.ACS_VLINE,
-            C.ACS_HLINE, C.ACS_HLINE,
-            C.ACS_ULCORNER, C.ACS_URCORNER,
-            C.ACS_LLCORNER, C.ACS_LRCORNER)
-            ]]
+      self._frame:border(C.ACS_VLINE, C.ACS_VLINE, C.ACS_HLINE, C.ACS_HLINE, C.ACS_ULCORNER, C.ACS_URCORNER, C.ACS_LLCORNER, C.ACS_LRCORNER)
       if self.label then
         self._frame:mvaddstr(0, math.floor((self.width - #self.label - 2) / 2), " " .. tostring(self.label) .. " ")
       end
