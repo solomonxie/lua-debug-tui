@@ -72,12 +72,11 @@ class Pad
         if @height == AUTO
             @height = @_height + 2
 
-        @_width = 0
-        for i=1,#@columns[1]
-            row_len = #@columns - 1
-            for col in *@columns
-                row_len += #col[i]
-            @_width = math.max(@_width, row_len)
+        @_width = #@columns-1
+        for i,col in ipairs(@columns)
+            col_width = 0
+            for chunk in *col do col_width = math.max(col_width, #chunk)
+            @_width += col_width
         if @width == AUTO
             @width = @_width + 2
 
@@ -176,7 +175,7 @@ class NumberedPad extends Pad
         col1 = select(1, ...)
         fmt = "%#{#tostring(#col1)}d"
         line_nums = [fmt\format(i) for i=1,#col1]
-        cols = {line_nums, ((i)=>color("yellow")), ...}
+        cols = {line_nums, ((i)=> i == @selected and color("white bold") or color("yellow")), ...}
         super @label, @y, @x, height, width, unpack(cols)
 
 ok, to_lua = pcall -> require('moonscript.base').to_lua
@@ -267,6 +266,8 @@ run_debugger = (err_msg)->
         for i,line in ipairs(err_msg_lines)
             err_msg_lines[i] = (" ")\rep(2)..line
         pads.err = Pad("Error Message", 0,0,AUTO,SCREEN_W, err_msg_lines, (i)=> color("red bold"))
+        pads.err._frame\attrset(color("red"))
+        pads.err\refresh!
 
     stack_locations = {}
     do -- Stack pad
@@ -294,16 +295,18 @@ run_debugger = (err_msg)->
             max_filename = math.max(max_filename, #line)
             max_fn_name = math.max(max_fn_name, #fn_name)
         callstack = {}
-        max_line = 0
+        max_fn_name, max_filename = 0, 0
         for i=1,#stack_names do
             fn_name = stack_names[i]
             callstack[i] = {fn_name, stack_locations[i]}
-            max_line = math.max(max_line, #fn_name+#stack_locations[i]+3)
+            max_fn_name = math.max(max_fn_name, #fn_name)
+            max_filename = math.max(max_filename, #stack_locations[i])
 
         stack_h = math.max(#callstack+2, math.floor(2/3*SCREEN_H))
-        pads.stack = Pad "(C)allstack",pads.err.height,SCREEN_W-(max_line+2),stack_h,max_line+2,
-            stack_names, ((i)=> (i == @selected) and color("black on green") or color("green")),
-            stack_locations, ((i)=> (i == @selected) and color("black on cyan") or color("cyan"))
+        stack_w = max_fn_name + 1 + max_filename
+        pads.stack = Pad "(C)allstack",pads.err.height,SCREEN_W-stack_w,stack_h,stack_w,
+            stack_names, ((i)=> (i == @selected) and color("black on green") or color("green bold")),
+            stack_locations, ((i)=> (i == @selected) and color("black on cyan") or color("cyan bold"))
     
     show_src = (filename, line_no)->
         if pads.src
@@ -317,7 +320,7 @@ run_debugger = (err_msg)->
                 pads.stack.height,pads.stack.x, src_lines, (i)=>
                     if i == @selected then return color("black on white")
                     elseif i == line_no then return color("yellow on red bold")
-                    return color("white bold")
+                    return color("white")
             pads.src\select(line_no)
         else
             lines = {}
@@ -349,7 +352,7 @@ run_debugger = (err_msg)->
         var_x = 0
         --height = math.min(2+#var_names, SCREEN_H-pads.err.height-pads.stack.height)
         height = SCREEN_H-(pads.err.height+pads.stack.height)
-        pads.vars = Pad "(V)ars", var_y,var_x,height,AUTO,var_names, (i)=> color()
+        pads.vars = Pad "(V)ars", var_y,var_x,height,AUTO,var_names, ((i)=> i == @selected and color('reverse') or color())
 
         pads.vars.on_select = (var_index)=>
             value_x = pads.vars.x+pads.vars.width
@@ -365,7 +368,7 @@ run_debugger = (err_msg)->
         pads.vars\select(1)
 
     pads.stack.on_select = (stack_index)=>
-        filename = pads.stack.columns[2][stack_index]\match("([^:]*):.*")
+        filename,line_no = pads.stack.columns[2][stack_index]\match("([^:]*):(%d*).*")
         --filename, line_no = pads.stack.lines[stack_index]\match("[^|]*| ([^:]*):(%d*).*")
         line_no = tonumber(line_no)
         show_src(filename, line_no)

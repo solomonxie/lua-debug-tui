@@ -51,15 +51,14 @@ do
       if self.height == AUTO then
         self.height = self._height + 2
       end
-      self._width = 0
-      for i = 1, #self.columns[1] do
-        local row_len = #self.columns - 1
-        local _list_0 = self.columns
-        for _index_0 = 1, #_list_0 do
-          local col = _list_0[_index_0]
-          row_len = row_len + #col[i]
+      self._width = #self.columns - 1
+      for i, col in ipairs(self.columns) do
+        local col_width = 0
+        for _index_0 = 1, #col do
+          local chunk = col[_index_0]
+          col_width = math.max(col_width, #chunk)
         end
-        self._width = math.max(self._width, row_len)
+        self._width = self._width + col_width
       end
       if self.width == AUTO then
         self.width = self._width + 2
@@ -250,7 +249,7 @@ do
       local cols = {
         line_nums,
         (function(self, i)
-          return color("yellow")
+          return i == self.selected and color("white bold") or color("yellow")
         end),
         ...
       }
@@ -405,6 +404,8 @@ run_debugger = function(err_msg)
     pads.err = Pad("Error Message", 0, 0, AUTO, SCREEN_W, err_msg_lines, function(self, i)
       return color("red bold")
     end)
+    pads.err._frame:attrset(color("red"))
+    pads.err:refresh()
   end
   local stack_locations = { }
   do
@@ -440,20 +441,22 @@ run_debugger = function(err_msg)
       max_fn_name = math.max(max_fn_name, #fn_name)
     end
     local callstack = { }
-    local max_line = 0
+    max_fn_name, max_filename = 0, 0
     for i = 1, #stack_names do
       local fn_name = stack_names[i]
       callstack[i] = {
         fn_name,
         stack_locations[i]
       }
-      max_line = math.max(max_line, #fn_name + #stack_locations[i] + 3)
+      max_fn_name = math.max(max_fn_name, #fn_name)
+      max_filename = math.max(max_filename, #stack_locations[i])
     end
     local stack_h = math.max(#callstack + 2, math.floor(2 / 3 * SCREEN_H))
-    pads.stack = Pad("(C)allstack", pads.err.height, SCREEN_W - (max_line + 2), stack_h, max_line + 2, stack_names, (function(self, i)
-      return (i == self.selected) and color("black on green") or color("green")
+    local stack_w = max_fn_name + 1 + max_filename
+    pads.stack = Pad("(C)allstack", pads.err.height, SCREEN_W - stack_w, stack_h, stack_w, stack_names, (function(self, i)
+      return (i == self.selected) and color("black on green") or color("green bold")
     end), stack_locations, (function(self, i)
-      return (i == self.selected) and color("black on cyan") or color("cyan")
+      return (i == self.selected) and color("black on cyan") or color("cyan bold")
     end))
   end
   local show_src
@@ -473,7 +476,7 @@ run_debugger = function(err_msg)
         elseif i == line_no then
           return color("yellow on red bold")
         end
-        return color("white bold")
+        return color("white")
       end)
       return pads.src:select(line_no)
     else
@@ -515,9 +518,9 @@ run_debugger = function(err_msg)
     local var_y = pads.stack.y + pads.stack.height
     local var_x = 0
     local height = SCREEN_H - (pads.err.height + pads.stack.height)
-    pads.vars = Pad("(V)ars", var_y, var_x, height, AUTO, var_names, function(self, i)
-      return color()
-    end)
+    pads.vars = Pad("(V)ars", var_y, var_x, height, AUTO, var_names, (function(self, i)
+      return i == self.selected and color('reverse') or color()
+    end))
     pads.vars.on_select = function(self, var_index)
       local value_x = pads.vars.x + pads.vars.width
       local value_w = SCREEN_W - (value_x)
@@ -536,8 +539,8 @@ run_debugger = function(err_msg)
     return pads.vars:select(1)
   end
   pads.stack.on_select = function(self, stack_index)
-    local filename = pads.stack.columns[2][stack_index]:match("([^:]*):.*")
-    local line_no = tonumber(line_no)
+    local filename, line_no = pads.stack.columns[2][stack_index]:match("([^:]*):(%d*).*")
+    line_no = tonumber(line_no)
     show_src(filename, line_no)
     return show_vars(stack_index)
   end
