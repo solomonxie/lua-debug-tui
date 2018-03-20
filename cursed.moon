@@ -56,6 +56,7 @@ class Pad
             table.insert(@colors, color_fn)
 
         @configure_size height, width
+        log\write("New pad: #{@height},#{@width}  #{@_height},#{@_width}\n")
         @_frame = C.newwin(@height, @width, @y, @x)
         @_frame\immedok(true)
         @_pad = C.newpad(@_height, @_width)
@@ -68,7 +69,7 @@ class Pad
         @dirty = true
     
     configure_size: (@height, @width)=>
-        @_height = #@columns[1]
+        @_height = math.max(#@columns[1], 1)
         if @height == AUTO
             @height = @_height + 2
 
@@ -77,6 +78,7 @@ class Pad
             col_width = 0
             for chunk in *col do col_width = math.max(col_width, #chunk)
             @_width += col_width
+        @_width = math.max(@_width, 1)
         if @width == AUTO
             @width = @_width + 2
 
@@ -359,9 +361,9 @@ run_debugger = (err_msg)->
             value_w = SCREEN_W-(value_x)
             -- Show single value:
             if var_index
-                pads.values = Pad "V(a)lue",var_y,value_x,pads.vars.height,value_w,wrap_text(values[var_index], value_w-2), (i)=>color()
+                pads.values = Pad "(D)ata",var_y,value_x,pads.vars.height,value_w,wrap_text(values[var_index], value_w-2), (i)=>color()
             else
-                pads.values = Pad "V(a)lue",var_y,value_x,pads.vars.height,value_w,values, (i)=>color()
+                pads.values = Pad "(D)ata",var_y,value_x,pads.vars.height,value_w,{}, (i)=>color()
             collectgarbage()
             collectgarbage()
 
@@ -424,8 +426,8 @@ run_debugger = (err_msg)->
             when ('v')\byte!
                 select_pad(pads.vars) -- (V)ars
 
-            when ('a')\byte!
-                select_pad(pads.values) -- V(a)lue
+            when ('d')\byte!
+                select_pad(pads.values) -- (D)ata
 
             when ('o')\byte!
                 file = stack_locations[pads.stack.selected]

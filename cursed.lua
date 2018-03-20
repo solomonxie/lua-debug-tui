@@ -47,7 +47,7 @@ do
   local _base_0 = {
     configure_size = function(self, height, width)
       self.height, self.width = height, width
-      self._height = #self.columns[1]
+      self._height = math.max(#self.columns[1], 1)
       if self.height == AUTO then
         self.height = self._height + 2
       end
@@ -60,6 +60,7 @@ do
         end
         self._width = self._width + col_width
       end
+      self._width = math.max(self._width, 1)
       if self.width == AUTO then
         self.width = self._width + 2
       end
@@ -199,6 +200,7 @@ do
         table.insert(self.colors, color_fn)
       end
       self:configure_size(height, width)
+      log:write("New pad: " .. tostring(self.height) .. "," .. tostring(self.width) .. "  " .. tostring(self._height) .. "," .. tostring(self._width) .. "\n")
       self._frame = C.newwin(self.height, self.width, self.y, self.x)
       self._frame:immedok(true)
       self._pad = C.newpad(self._height, self._width)
@@ -525,11 +527,11 @@ run_debugger = function(err_msg)
       local value_x = pads.vars.x + pads.vars.width
       local value_w = SCREEN_W - (value_x)
       if var_index then
-        pads.values = Pad("V(a)lue", var_y, value_x, pads.vars.height, value_w, wrap_text(values[var_index], value_w - 2), function(self, i)
+        pads.values = Pad("(D)ata", var_y, value_x, pads.vars.height, value_w, wrap_text(values[var_index], value_w - 2), function(self, i)
           return color()
         end)
       else
-        pads.values = Pad("V(a)lue", var_y, value_x, pads.vars.height, value_w, values, function(self, i)
+        pads.values = Pad("(D)ata", var_y, value_x, pads.vars.height, value_w, { }, function(self, i)
           return color()
         end)
       end
@@ -590,7 +592,7 @@ run_debugger = function(err_msg)
       select_pad(pads.src)
     elseif ('v'):byte() == _exp_0 then
       select_pad(pads.vars)
-    elseif ('a'):byte() == _exp_0 then
+    elseif ('d'):byte() == _exp_0 then
       select_pad(pads.values)
     elseif ('o'):byte() == _exp_0 then
       local file = stack_locations[pads.stack.selected]
