@@ -1,7 +1,7 @@
 local C = require("curses")
 local re = require('re')
 local repr = require('repr')
-local run_debugger, guard, stdscr
+local ldb, stdscr
 local AUTO = { }
 local log = io.open("output.log", "w")
 local callstack_range
@@ -13,15 +13,15 @@ callstack_range = function()
       min = i - 1
       break
     end
-    if info.func == run_debugger then
-      min = i + 1
+    if info.func == ldb.run_debugger then
+      min = i + 2
       break
     end
   end
   for i = min, 999 do
     local info = debug.getinfo(i, 'f')
-    if not info or info.func == guard then
-      max = i - 0
+    if not info or info.func == ldb.guard then
+      max = i - 3
       break
     end
   end
@@ -40,6 +40,56 @@ wrap_text = function(text, width)
     end
   end
   return lines
+end
+local color
+do
+  local color_index = 0
+  local existing = { }
+  local make_color
+  make_color = function(fg, bg)
+    if fg == nil then
+      fg = -1
+    end
+    if bg == nil then
+      bg = -1
+    end
+    local key = tostring(fg) .. "," .. tostring(bg)
+    if not (existing[key]) then
+      color_index = color_index + 1
+      C.init_pair(color_index, fg, bg)
+      existing[key] = C.color_pair(color_index)
+    end
+    return existing[key]
+  end
+  local color_lang = re.compile([[        x <- {|
+            {:attrs: {| {attr} (" " {attr})* |} :}
+            / (
+                ({:bg: "on " {color} :} / ({:fg: color :} (" on " {:bg: color :})?))
+                {:attrs: {| (" " {attr})* |} :})
+        |}
+        attr <- "blink" / "bold" / "dim" / "invis" / "normal" / "protect" / "reverse" / "standout" / "underline"
+        color <- "black" / "blue" / "cyan" / "green" / "magenta" / "red" / "white" / "yellow" / "default"
+    ]])
+  C.COLOR_DEFAULT = -1
+  color = function(s)
+    if s == nil then
+      s = "default"
+    end
+    local t = assert(color_lang:match(s), "Invalid color: " .. tostring(s))
+    if t.fg then
+      t.fg = C["COLOR_" .. t.fg:upper()]
+    end
+    if t.bg then
+      t.bg = C["COLOR_" .. t.bg:upper()]
+    end
+    local c = make_color(t.fg, t.bg)
+    local _list_0 = t.attrs
+    for _index_0 = 1, #_list_0 do
+      local a = _list_0[_index_0]
+      c = c | C["A_" .. a:upper()]
+    end
+    return c
+  end
 end
 local Pad
 do
@@ -317,333 +367,284 @@ local line_tables = setmetatable({ }, {
     end
   end
 })
-run_debugger = function(err_msg)
-  stdscr = C.initscr()
-  SCREEN_H, SCREEN_W = stdscr:getmaxyx()
-  C.cbreak()
-  C.echo(false)
-  C.nl(false)
-  C.curs_set(0)
-  C.start_color()
-  C.use_default_colors()
-  local color_index = 0
-  local existing = { }
-  local make_color
-  make_color = function(fg, bg)
-    if fg == nil then
-      fg = -1
-    end
-    if bg == nil then
-      bg = -1
-    end
-    local key = tostring(fg) .. "," .. tostring(bg)
-    if not (existing[key]) then
-      color_index = color_index + 1
-      C.init_pair(color_index, fg, bg)
-      existing[key] = C.color_pair(color_index)
-    end
-    return existing[key]
-  end
-  local color_lang = re.compile([[        x <- {|
-            {:attrs: {| {attr} (" " {attr})* |} :}
-            / (
-                ({:bg: "on " {color} :} / ({:fg: color :} (" on " {:bg: color :})?))
-                {:attrs: {| (" " {attr})* |} :})
-        |}
-        attr <- "blink" / "bold" / "dim" / "invis" / "normal" / "protect" / "reverse" / "standout" / "underline"
-        color <- "black" / "blue" / "cyan" / "green" / "magenta" / "red" / "white" / "yellow" / "default"
-    ]])
-  C.COLOR_DEFAULT = -1
-  color = function(s)
-    if s == nil then
-      s = "default"
-    end
-    local t = assert(color_lang:match(s), "Invalid color: " .. tostring(s))
-    if t.fg then
-      t.fg = C["COLOR_" .. t.fg:upper()]
-    end
-    if t.bg then
-      t.bg = C["COLOR_" .. t.bg:upper()]
-    end
-    local c = make_color(t.fg, t.bg)
-    local _list_0 = t.attrs
-    for _index_0 = 1, #_list_0 do
-      local a = _list_0[_index_0]
-      c = c | C["A_" .. a:upper()]
-    end
-    return c
-  end
-  do
-    stdscr:wbkgd(color("yellow on red bold"))
-    stdscr:clear()
-    stdscr:refresh()
-    local lines = wrap_text("ERROR!\n \n " .. err_msg .. "\n \npress any key...", math.floor(SCREEN_W / 2))
-    local max_line = 0
-    for _index_0 = 1, #lines do
-      local line = lines[_index_0]
-      max_line = math.max(max_line, #line)
-    end
-    for i, line in ipairs(lines) do
-      if i == 1 or i == #lines then
-        stdscr:mvaddstr(math.floor(SCREEN_H / 2 - #lines / 2) + i, math.floor((SCREEN_W - #line) / 2), line)
-      else
-        stdscr:mvaddstr(math.floor(SCREEN_H / 2 - #lines / 2) + i, math.floor((SCREEN_W - max_line) / 2), line)
-      end
-    end
-    stdscr:refresh()
-    C.doupdate()
-    stdscr:getch()
-  end
-  stdscr:wbkgd(color())
-  stdscr:clear()
-  stdscr:refresh()
-  local pads = { }
-  do
-    local err_msg_lines = wrap_text(err_msg, SCREEN_W - 4)
-    for i, line in ipairs(err_msg_lines) do
-      err_msg_lines[i] = (" "):rep(2) .. line
-    end
-    pads.err = Pad("Error Message", 0, 0, AUTO, SCREEN_W, err_msg_lines, function(self, i)
-      return color("red bold")
-    end)
-    pads.err._frame:attrset(color("red"))
-    pads.err:refresh()
-  end
-  local stack_locations = { }
-  do
-    local stack_names = { }
-    local max_filename, max_fn_name = 0, 0
-    local stack_min, stack_max = callstack_range()
-    for i = stack_min, stack_max do
-      local info = debug.getinfo(i)
-      if not info then
-        break
-      end
-      local fn_name = info.name or "<unnamed function>"
-      table.insert(stack_names, fn_name)
-      local line
-      if info.short_src then
-        local line_table = line_tables[info.short_src]
-        if line_table then
-          local char = line_table[info.currentline]
-          local line_num = 1
-          local file = file_cache[info.short_src]
-          for _ in file:sub(1, char):gmatch("\n") do
-            line_num = line_num + 1
-          end
-          line = tostring(info.short_src) .. ":" .. tostring(line_num)
-        else
-          line = info.short_src .. ":" .. info.currentline
-        end
-      else
-        line = "???"
-      end
-      table.insert(stack_locations, line)
-      max_filename = math.max(max_filename, #line)
-      max_fn_name = math.max(max_fn_name, #fn_name)
-    end
-    local callstack = { }
-    max_fn_name, max_filename = 0, 0
-    for i = 1, #stack_names do
-      local fn_name = stack_names[i]
-      callstack[i] = {
-        fn_name,
-        stack_locations[i]
-      }
-      max_fn_name = math.max(max_fn_name, #fn_name)
-      max_filename = math.max(max_filename, #stack_locations[i])
-    end
-    local stack_h = math.max(#callstack + 2, math.floor(2 / 3 * SCREEN_H))
-    local stack_w = max_fn_name + 1 + max_filename
-    pads.stack = Pad("(C)allstack", pads.err.height, SCREEN_W - stack_w, stack_h, stack_w, stack_names, (function(self, i)
-      return (i == self.selected) and color("black on green") or color("green bold")
-    end), stack_locations, (function(self, i)
-      return (i == self.selected) and color("black on cyan") or color("cyan bold")
-    end))
-  end
-  local show_src
-  show_src = function(filename, line_no)
-    if pads.src then
-      pads.src:erase()
-    end
-    local file = file_cache[filename]
-    if file then
-      local src_lines = { }
-      for line in (file .. '\n'):gmatch("([^\n]*)\n") do
-        table.insert(src_lines, line)
-      end
-      pads.src = NumberedPad("(S)ource Code", pads.err.height, 0, pads.stack.height, pads.stack.x, src_lines, function(self, i)
-        if i == self.selected then
-          return color("black on white")
-        elseif i == line_no then
-          return color("yellow on red bold")
-        end
-        return color("white")
-      end)
-      return pads.src:select(line_no)
-    else
-      local lines = { }
-      for i = 1, math.floor(pads.stack.height / 2) - 1 do
-        table.insert(lines, "")
-      end
-      local s = "<no source code found>"
-      s = (" "):rep(math.floor((pads.stack.x - 2 - #s) / 2)) .. s
-      table.insert(lines, s)
-      pads.src = Pad("(S)ource Code", pads.err.height, 0, pads.stack.height, pads.stack.x, lines, function()
-        return color("red")
-      end)
-    end
-  end
-  local show_vars
-  show_vars = function(stack_index)
-    if pads.vars then
-      pads.vars:erase()
-    end
-    if pads.values then
-      pads.values:erase()
-    end
-    local callstack_min, _ = callstack_range()
-    local var_names, values = { }, { }
-    for loc = 1, 999 do
-      local name, value = debug.getlocal(callstack_min + stack_index - 1, loc)
-      if value == nil then
-        break
-      end
-      table.insert(var_names, tostring(name))
-      if type(value) == 'function' then
-        local info = debug.getinfo(value, 'nS')
-        table.insert(values, repr(info))
-      else
-        table.insert(values, repr(value))
-      end
-    end
-    local var_y = pads.stack.y + pads.stack.height
-    local var_x = 0
-    local height = SCREEN_H - (pads.err.height + pads.stack.height)
-    pads.vars = Pad("(V)ars", var_y, var_x, height, AUTO, var_names, (function(self, i)
-      return i == self.selected and color('reverse') or color()
-    end))
-    pads.vars.on_select = function(self, var_index)
-      local value_x = pads.vars.x + pads.vars.width
-      local value_w = SCREEN_W - (value_x)
-      if var_index then
-        pads.values = Pad("(D)ata", var_y, value_x, pads.vars.height, value_w, wrap_text(values[var_index], value_w - 2), function(self, i)
-          return color()
-        end)
-      else
-        pads.values = Pad("(D)ata", var_y, value_x, pads.vars.height, value_w, { }, function(self, i)
-          return color()
-        end)
-      end
-      collectgarbage()
-      return collectgarbage()
-    end
-    return pads.vars:select(1)
-  end
-  pads.stack.on_select = function(self, stack_index)
-    local filename, line_no = pads.stack.columns[2][stack_index]:match("([^:]*):(%d*).*")
-    line_no = tonumber(line_no)
-    show_src(filename, line_no)
-    return show_vars(stack_index)
-  end
-  pads.stack:select(1)
-  local selected_pad = nil
-  local select_pad
-  select_pad = function(pad)
-    if selected_pad ~= pad then
-      if selected_pad then
-        selected_pad:set_active(false)
-        selected_pad:refresh()
-      end
-      selected_pad = pad
-      selected_pad:set_active(true)
-      return selected_pad:refresh()
-    end
-  end
-  select_pad(pads.src)
-  while true do
-    for _, p in pairs(pads) do
-      if p.dirty then
-        p:refresh()
-      end
-    end
-    C.doupdate()
-    local c = stdscr:getch()
-    local _exp_0 = c
-    if C.KEY_DOWN == _exp_0 or C.KEY_SF == _exp_0 or ("j"):byte() == _exp_0 then
-      selected_pad:scroll(1, 0)
-    elseif ('J'):byte() == _exp_0 then
-      selected_pad:scroll(10, 0)
-    elseif C.KEY_UP == _exp_0 or C.KEY_SR == _exp_0 or ("k"):byte() == _exp_0 then
-      selected_pad:scroll(-1, 0)
-    elseif ('K'):byte() == _exp_0 then
-      selected_pad:scroll(-10, 0)
-    elseif C.KEY_RIGHT == _exp_0 or ("l"):byte() == _exp_0 then
-      selected_pad:scroll(0, 1)
-    elseif ("L"):byte() == _exp_0 then
-      selected_pad:scroll(0, 10)
-    elseif C.KEY_LEFT == _exp_0 or ("h"):byte() == _exp_0 then
-      selected_pad:scroll(0, -1)
-    elseif ("H"):byte() == _exp_0 then
-      selected_pad:scroll(0, -10)
-    elseif ('c'):byte() == _exp_0 then
-      select_pad(pads.stack)
-    elseif ('s'):byte() == _exp_0 then
-      select_pad(pads.src)
-    elseif ('v'):byte() == _exp_0 then
-      select_pad(pads.vars)
-    elseif ('d'):byte() == _exp_0 then
-      select_pad(pads.values)
-    elseif ('o'):byte() == _exp_0 then
-      local file = stack_locations[pads.stack.selected]
-      local filename, line_no = file:match("([^:]*):(.*)")
-      line_no = tostring(pads.src.selected)
-      C.endwin()
-      os.execute((os.getenv("EDITOR") or "nano") .. " +" .. line_no .. " " .. filename)
-      stdscr = C.initscr()
-      C.cbreak()
-      C.echo(false)
-      C.nl(false)
-      C.curs_set(0)
-      C.start_color()
-      C.use_default_colors()
+local err_hand
+err_hand = function(err)
+  C.endwin()
+  print("Error in debugger.")
+  print(debug.traceback(err, 2))
+  return os.exit(2)
+end
+ldb = {
+  run_debugger = function(err_msg)
+    stdscr = C.initscr()
+    SCREEN_H, SCREEN_W = stdscr:getmaxyx()
+    C.cbreak()
+    C.echo(false)
+    C.nl(false)
+    C.curs_set(0)
+    C.start_color()
+    C.use_default_colors()
+    do
+      stdscr:wbkgd(color("yellow on red bold"))
       stdscr:clear()
       stdscr:refresh()
-      for _, pad in pairs(pads) do
-        pad:refresh()
+      local lines = wrap_text("ERROR!\n \n " .. err_msg .. "\n \npress any key...", math.floor(SCREEN_W / 2))
+      local max_line = 0
+      for _index_0 = 1, #lines do
+        local line = lines[_index_0]
+        max_line = math.max(max_line, #line)
       end
-    elseif ('q'):byte() == _exp_0 or ("Q"):byte() == _exp_0 then
-      pads = { }
-      C.endwin()
-      return 
+      for i, line in ipairs(lines) do
+        if i == 1 or i == #lines then
+          stdscr:mvaddstr(math.floor(SCREEN_H / 2 - #lines / 2) + i, math.floor((SCREEN_W - #line) / 2), line)
+        else
+          stdscr:mvaddstr(math.floor(SCREEN_H / 2 - #lines / 2) + i, math.floor((SCREEN_W - max_line) / 2), line)
+        end
+      end
+      stdscr:refresh()
+      C.doupdate()
+      stdscr:getch()
+    end
+    stdscr:wbkgd(color())
+    stdscr:clear()
+    stdscr:refresh()
+    local pads = { }
+    do
+      local err_msg_lines = wrap_text(err_msg, SCREEN_W - 4)
+      for i, line in ipairs(err_msg_lines) do
+        err_msg_lines[i] = (" "):rep(2) .. line
+      end
+      pads.err = Pad("Error Message", 0, 0, AUTO, SCREEN_W, err_msg_lines, function(self, i)
+        return color("red bold")
+      end)
+      pads.err._frame:attrset(color("red"))
+      pads.err:refresh()
+    end
+    local stack_locations = { }
+    do
+      local stack_names = { }
+      local max_filename, max_fn_name = 0, 0
+      local stack_min, stack_max = callstack_range()
+      for i = stack_min, stack_max do
+        local info = debug.getinfo(i)
+        if not info then
+          break
+        end
+        local fn_name = info.name or "<unnamed function>"
+        table.insert(stack_names, fn_name)
+        local line
+        if info.short_src then
+          local line_table = line_tables[info.short_src]
+          if line_table then
+            local char = line_table[info.currentline]
+            local line_num = 1
+            local file = file_cache[info.short_src]
+            for _ in file:sub(1, char):gmatch("\n") do
+              line_num = line_num + 1
+            end
+            line = tostring(info.short_src) .. ":" .. tostring(line_num)
+          else
+            line = info.short_src .. ":" .. info.currentline
+          end
+        else
+          line = "???"
+        end
+        table.insert(stack_locations, line)
+        max_filename = math.max(max_filename, #line)
+        max_fn_name = math.max(max_fn_name, #fn_name)
+      end
+      local callstack = { }
+      max_fn_name, max_filename = 0, 0
+      for i = 1, #stack_names do
+        local fn_name = stack_names[i]
+        callstack[i] = {
+          fn_name,
+          stack_locations[i]
+        }
+        max_fn_name = math.max(max_fn_name, #fn_name)
+        max_filename = math.max(max_filename, #stack_locations[i])
+      end
+      local stack_h = math.max(#callstack + 2, math.floor(2 / 3 * SCREEN_H))
+      local stack_w = max_fn_name + 1 + max_filename
+      pads.stack = Pad("(C)allstack", pads.err.height, SCREEN_W - stack_w, stack_h, stack_w, stack_names, (function(self, i)
+        return (i == self.selected) and color("black on green") or color("green bold")
+      end), stack_locations, (function(self, i)
+        return (i == self.selected) and color("black on cyan") or color("cyan bold")
+      end))
+    end
+    local show_src
+    show_src = function(filename, line_no)
+      if pads.src then
+        pads.src:erase()
+      end
+      local file = file_cache[filename]
+      if file then
+        local src_lines = { }
+        for line in (file .. '\n'):gmatch("([^\n]*)\n") do
+          table.insert(src_lines, line)
+        end
+        pads.src = NumberedPad("(S)ource Code", pads.err.height, 0, pads.stack.height, pads.stack.x, src_lines, function(self, i)
+          if i == line_no and i == self.selected then
+            return color("yellow on red bold")
+          elseif i == self.selected then
+            return color("black on white")
+          elseif i == line_no then
+            return color("red on black bold")
+          end
+          return color("white")
+        end)
+        return pads.src:select(line_no)
+      else
+        local lines = { }
+        for i = 1, math.floor(pads.stack.height / 2) - 1 do
+          table.insert(lines, "")
+        end
+        local s = "<no source code found>"
+        s = (" "):rep(math.floor((pads.stack.x - 2 - #s) / 2)) .. s
+        table.insert(lines, s)
+        pads.src = Pad("(S)ource Code", pads.err.height, 0, pads.stack.height, pads.stack.x, lines, function()
+          return color("red")
+        end)
+      end
+    end
+    local show_vars
+    show_vars = function(stack_index)
+      if pads.vars then
+        pads.vars:erase()
+      end
+      if pads.values then
+        pads.values:erase()
+      end
+      local callstack_min, _ = callstack_range()
+      local var_names, values = { }, { }
+      for loc = 1, 999 do
+        local name, value = debug.getlocal(callstack_min + stack_index - 1, loc)
+        if value == nil then
+          break
+        end
+        table.insert(var_names, tostring(name))
+        if type(value) == 'function' then
+          local info = debug.getinfo(value, 'nS')
+          table.insert(values, repr(info))
+        else
+          table.insert(values, repr(value))
+        end
+      end
+      local var_y = pads.stack.y + pads.stack.height
+      local var_x = 0
+      local height = SCREEN_H - (pads.err.height + pads.stack.height)
+      pads.vars = Pad("(V)ars", var_y, var_x, height, AUTO, var_names, (function(self, i)
+        return i == self.selected and color('reverse') or color()
+      end))
+      pads.vars.on_select = function(self, var_index)
+        local value_x = pads.vars.x + pads.vars.width
+        local value_w = SCREEN_W - (value_x)
+        if var_index then
+          pads.values = Pad("(D)ata", var_y, value_x, pads.vars.height, value_w, wrap_text(values[var_index], value_w - 2), function(self, i)
+            return color()
+          end)
+        else
+          pads.values = Pad("(D)ata", var_y, value_x, pads.vars.height, value_w, { }, function(self, i)
+            return color()
+          end)
+        end
+        collectgarbage()
+        return collectgarbage()
+      end
+      return pads.vars:select(1)
+    end
+    pads.stack.on_select = function(self, stack_index)
+      local filename, line_no = pads.stack.columns[2][stack_index]:match("([^:]*):(%d*).*")
+      line_no = tonumber(line_no)
+      show_src(filename, line_no)
+      return show_vars(stack_index)
+    end
+    pads.stack:select(1)
+    local selected_pad = nil
+    local select_pad
+    select_pad = function(pad)
+      if selected_pad ~= pad then
+        if selected_pad then
+          selected_pad:set_active(false)
+          selected_pad:refresh()
+        end
+        selected_pad = pad
+        selected_pad:set_active(true)
+        return selected_pad:refresh()
+      end
+    end
+    select_pad(pads.src)
+    while true do
+      for _, p in pairs(pads) do
+        if p.dirty then
+          p:refresh()
+        end
+      end
+      C.doupdate()
+      local c = stdscr:getch()
+      local _exp_0 = c
+      if C.KEY_DOWN == _exp_0 or C.KEY_SF == _exp_0 or ("j"):byte() == _exp_0 then
+        selected_pad:scroll(1, 0)
+      elseif ('J'):byte() == _exp_0 then
+        selected_pad:scroll(10, 0)
+      elseif C.KEY_UP == _exp_0 or C.KEY_SR == _exp_0 or ("k"):byte() == _exp_0 then
+        selected_pad:scroll(-1, 0)
+      elseif ('K'):byte() == _exp_0 then
+        selected_pad:scroll(-10, 0)
+      elseif C.KEY_RIGHT == _exp_0 or ("l"):byte() == _exp_0 then
+        selected_pad:scroll(0, 1)
+      elseif ("L"):byte() == _exp_0 then
+        selected_pad:scroll(0, 10)
+      elseif C.KEY_LEFT == _exp_0 or ("h"):byte() == _exp_0 then
+        selected_pad:scroll(0, -1)
+      elseif ("H"):byte() == _exp_0 then
+        selected_pad:scroll(0, -10)
+      elseif ('c'):byte() == _exp_0 then
+        select_pad(pads.stack)
+      elseif ('s'):byte() == _exp_0 then
+        select_pad(pads.src)
+      elseif ('v'):byte() == _exp_0 then
+        select_pad(pads.vars)
+      elseif ('d'):byte() == _exp_0 then
+        select_pad(pads.values)
+      elseif ('o'):byte() == _exp_0 then
+        local file = stack_locations[pads.stack.selected]
+        local filename, line_no = file:match("([^:]*):(.*)")
+        line_no = tostring(pads.src.selected)
+        C.endwin()
+        os.execute((os.getenv("EDITOR") or "nano") .. " +" .. line_no .. " " .. filename)
+        stdscr = C.initscr()
+        C.cbreak()
+        C.echo(false)
+        C.nl(false)
+        C.curs_set(0)
+        C.start_color()
+        C.use_default_colors()
+        stdscr:clear()
+        stdscr:refresh()
+        for _, pad in pairs(pads) do
+          pad:refresh()
+        end
+      elseif ('q'):byte() == _exp_0 or ("Q"):byte() == _exp_0 then
+        pads = { }
+        C.endwin()
+        return 
+      end
+    end
+    return C.endwin()
+  end,
+  guard = function(fn, ...)
+    return xpcall(fn, (function(err_msg)
+      return xpcall(ldb.run_debugger, err_hand, err_msg)
+    end), ...)
+  end,
+  breakpoint = function()
+    return xpcall(ldb.run_debugger, err_hand, "Breakpoint triggered!")
+  end,
+  hijack_error = function()
+    error = function(err_msg)
+      return xpcall(ldb.run_debugger, err_hand, err_msg)
     end
   end
-  return C.endwin()
-end
-guard = function(fn, ...)
-  local err_hand
-  err_hand = function(err)
-    C.endwin()
-    print("Caught an error:")
-    print(debug.traceback(err, 2))
-    return os.exit(2)
-  end
-  return xpcall(fn, (function(err_msg)
-    return xpcall(run_debugger, err_hand, err_msg)
-  end), ...)
-end
-local breakpoint
-breakpoint = function()
-  local err_hand
-  err_hand = function(err)
-    C.endwin()
-    print("Caught an error:")
-    print(debug.traceback(err, 2))
-    return os.exit(2)
-  end
-  return xpcall(run_debugger, err_hand, "Breakpoint triggered!")
-end
-return {
-  guard = guard,
-  breakpoint = breakpoint
 }
+return ldb
