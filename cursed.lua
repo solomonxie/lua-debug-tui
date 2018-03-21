@@ -78,7 +78,7 @@ do
           x = x + (self.column_widths[c] - #chunk)
         end
         if c < #self.columns then
-          chstr:set_ch(x, C.ACS_VLINE, self.active and self.active_frame or self.inactive_frame)
+          chstr:set_ch(x, C.ACS_VLINE, color("black bold"))
           x = x + 1
         end
       end
@@ -181,7 +181,7 @@ do
       self.selected = nil
       self.columns = { }
       self.column_widths = { }
-      self.active_frame = color("blue bold")
+      self.active_frame = color("white bold")
       self.inactive_frame = color("blue dim")
       self.colors = { }
       for i = 1, select('#', ...) - 1, 2 do

@@ -42,7 +42,7 @@ class Pad
 
         @columns = {}
         @column_widths = {}
-        @active_frame = color("blue bold")
+        @active_frame = color("white bold")
         @inactive_frame = color("blue dim")
         @colors = {}
         for i=1,select('#',...)-1,2
@@ -94,7 +94,7 @@ class Pad
                 chstr\set_str(x, " ", attr, @column_widths[c]-#chunk)
                 x += @column_widths[c]-#chunk
             if c < #@columns
-                chstr\set_ch(x, C.ACS_VLINE, @active and @active_frame or @inactive_frame)
+                chstr\set_ch(x, C.ACS_VLINE, color("black bold"))
                 x += 1
         @_pad\mvaddchstr(i-1,0,chstr)
         @dirty = true
