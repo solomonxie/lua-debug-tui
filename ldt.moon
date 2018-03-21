@@ -14,12 +14,12 @@ callstack_range = ->
             min = i-1
             break
         if info.func == run_debugger
-            min = i+1
+            min = i+2
             break
     for i=min,999
         info = debug.getinfo(i, 'f')
         if not info or info.func == guard
-            max = i-0
+            max = i-3
             break
     return min, max
 
@@ -454,23 +454,21 @@ run_debugger = (err_msg)->
 
     C.endwin!
 
+err_hand = (err)->
+    C.endwin!
+    print "Error in debugger."
+    print(debug.traceback(err, 2))
+    os.exit(2)
 
-guard = (fn, ...)->
-    err_hand = (err)->
-        C.endwin!
-        print "Caught an error:"
-        print(debug.traceback(err, 2))
-        os.exit(2)
+return {
+    guard: (fn, ...)->
+        return xpcall(fn, ((err_msg)-> xpcall(run_debugger, err_hand, err_msg)), ...)
 
-    return xpcall(fn, ((err_msg)-> xpcall(run_debugger, err_hand, err_msg)), ...)
+    breakpoint: ->
+        return xpcall(run_debugger, err_hand, "Breakpoint triggered!")
 
-breakpoint = ->
-    err_hand = (err)->
-        C.endwin!
-        print "Caught an error:"
-        print(debug.traceback(err, 2))
-        os.exit(2)
-
-    return xpcall(run_debugger, err_hand, "Breakpoint triggered!")
-
-return {:guard, :breakpoint}
+    hijack_error: ->
+        export error
+        error = (err_msg)->
+            return xpcall(run_debugger, err_hand, err_msg)
+}
