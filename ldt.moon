@@ -35,6 +35,38 @@ wrap_text = (text, width)->
     return lines
 
 
+local color
+do
+    color_index = 0
+    existing = {}
+    make_color = (fg=-1, bg=-1)->
+        key = "#{fg},#{bg}"
+        unless existing[key]
+            color_index += 1
+            C.init_pair(color_index, fg, bg)
+            existing[key] = C.color_pair(color_index)
+        return existing[key]
+    color_lang = re.compile[[
+        x <- {|
+            {:attrs: {| {attr} (" " {attr})* |} :}
+            / (
+                ({:bg: "on " {color} :} / ({:fg: color :} (" on " {:bg: color :})?))
+                {:attrs: {| (" " {attr})* |} :})
+        |}
+        attr <- "blink" / "bold" / "dim" / "invis" / "normal" / "protect" / "reverse" / "standout" / "underline"
+        color <- "black" / "blue" / "cyan" / "green" / "magenta" / "red" / "white" / "yellow" / "default"
+    ]]
+    C.COLOR_DEFAULT = -1
+    color = (s="default")->
+        t = assert(color_lang\match(s), "Invalid color: #{s}")
+        if t.fg then t.fg = C["COLOR_"..t.fg\upper!]
+        if t.bg then t.bg = C["COLOR_"..t.bg\upper!]
+        c = make_color(t.fg, t.bg)
+        for a in *t.attrs
+            c |= C["A_"..a\upper!]
+        return c
+
+
 class Pad
     new: (@label,@y,@x,height,width,...)=>
         @scroll_y, @scroll_x = 1, 1
@@ -219,36 +251,6 @@ ldb = {
         C.curs_set(0)
         C.start_color!
         C.use_default_colors!
-
-        color_index = 0
-        existing = {}
-        make_color = (fg=-1, bg=-1)->
-            key = "#{fg},#{bg}"
-            unless existing[key]
-                color_index += 1
-                C.init_pair(color_index, fg, bg)
-                existing[key] = C.color_pair(color_index)
-            return existing[key]
-        color_lang = re.compile[[
-            x <- {|
-                {:attrs: {| {attr} (" " {attr})* |} :}
-                / (
-                    ({:bg: "on " {color} :} / ({:fg: color :} (" on " {:bg: color :})?))
-                    {:attrs: {| (" " {attr})* |} :})
-            |}
-            attr <- "blink" / "bold" / "dim" / "invis" / "normal" / "protect" / "reverse" / "standout" / "underline"
-            color <- "black" / "blue" / "cyan" / "green" / "magenta" / "red" / "white" / "yellow" / "default"
-        ]]
-        C.COLOR_DEFAULT = -1
-        export color
-        color = (s="default")->
-            t = assert(color_lang\match(s), "Invalid color: #{s}")
-            if t.fg then t.fg = C["COLOR_"..t.fg\upper!]
-            if t.bg then t.bg = C["COLOR_"..t.bg\upper!]
-            c = make_color(t.fg, t.bg)
-            for a in *t.attrs
-                c |= C["A_"..a\upper!]
-            return c
 
         do -- Fullscreen flash
             stdscr\wbkgd(color"yellow on red bold")
