@@ -376,35 +376,46 @@ ldb = {
                 if var_index == nil then return
                 value_x = pads.vars.x+pads.vars.width
                 value_w = SCREEN_W-(value_x)
-                value = assert(values[var_index], "No value found for #{var_index}")
+                value = values[var_index]
+                type_str = type(value)
                 -- Show single value:
-                switch type(value)
+                switch type_str
                     when "string"
                         pads.values = Pad "(D)ata [string]",var_y,value_x,pads.vars.height,value_w,
                             wrap_text(value, value_w-2), (i)=>color()
                     when "table"
-                        type_str, value_str = 'table', repr(value)
-                        if mt = getmetatable(value)
+                        value_str = repr(value, 3)
+                        mt = getmetatable(value)
+                        if mt
                             type_str = if mt.__class and mt.__class.__name then mt.__class.__name
+                            elseif value.__base and value.__name then "class #{value.__name}"
                             else 'table with metatable'
                             if mt.__tostring
                                 value_str = tostring(value)
+                            else
+                                if value.__base and value.__name
+                                    value = value.__base
+                                    value_str = repr(value, 2)
+                                if #value_str >= value_w-2
+                                    key_repr = (k)-> type(k) == 'string' and k or "[#{repr(k,1)}]"
+                                    value_str = table.concat ["#{key_repr k} = #{repr v,1}" for k,v in pairs(value)], "\n \n"
+
                         pads.values = Pad "(D)ata [#{type_str}]",var_y,value_x,pads.vars.height,value_w,
                             wrap_text(value_str, value_w-2), (i)=>color("cyan bold")
                     when "function"
                         info = debug.getinfo(value, 'nS')
                         s = ("function '%s' defined at %s:%s")\format info.name or var_names[var_index],
                             info.short_src, info.linedefined
-                        pads.values = Pad "(D)ata [function]",var_y,value_x,pads.vars.height,value_w,
+                        pads.values = Pad "(D)ata [#{type_str}]",var_y,value_x,pads.vars.height,value_w,
                             wrap_text(s, value_w-2), (i)=>color("green bold")
                     when "number"
-                        pads.values = Pad "(D)ata [number]",var_y,value_x,pads.vars.height,value_w,
+                        pads.values = Pad "(D)ata [#{type_str}]",var_y,value_x,pads.vars.height,value_w,
                             wrap_text(repr(value), value_w-2), (i)=>color("magenta bold")
                     when "boolean"
-                        pads.values = Pad "(D)ata [boolean]",var_y,value_x,pads.vars.height,value_w,
+                        pads.values = Pad "(D)ata [#{type_str}]",var_y,value_x,pads.vars.height,value_w,
                             wrap_text(repr(value), value_w-2), (i)=> value and color("green bold") or color("red bold")
                     else
-                        pads.values = Pad "(D)ata [#{type(value)}]",var_y,value_x,pads.vars.height,value_w,
+                        pads.values = Pad "(D)ata [#{type_str}]",var_y,value_x,pads.vars.height,value_w,
                             wrap_text(repr(value), value_w-2), (i)=>color()
 
                 collectgarbage()

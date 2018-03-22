@@ -544,24 +544,45 @@ ldb = {
         end
         local value_x = pads.vars.x + pads.vars.width
         local value_w = SCREEN_W - (value_x)
-        local value = assert(values[var_index], "No value found for " .. tostring(var_index))
-        local _exp_0 = type(value)
+        local value = values[var_index]
+        local type_str = type(value)
+        local _exp_0 = type_str
         if "string" == _exp_0 then
           pads.values = Pad("(D)ata [string]", var_y, value_x, pads.vars.height, value_w, wrap_text(value, value_w - 2), function(self, i)
             return color()
           end)
         elseif "table" == _exp_0 then
-          local type_str, value_str = 'table', repr(value)
-          do
-            local mt = getmetatable(value)
-            if mt then
-              if mt.__class and mt.__class.__name then
-                type_str = mt.__class.__name
-              else
-                type_str = 'table with metatable'
+          local value_str = repr(value, 3)
+          local mt = getmetatable(value)
+          if mt then
+            if mt.__class and mt.__class.__name then
+              type_str = mt.__class.__name
+            elseif value.__base and value.__name then
+              type_str = "class " .. tostring(value.__name)
+            else
+              type_str = 'table with metatable'
+            end
+            if mt.__tostring then
+              value_str = tostring(value)
+            else
+              if value.__base and value.__name then
+                value = value.__base
+                value_str = repr(value, 2)
               end
-              if mt.__tostring then
-                value_str = tostring(value)
+              if #value_str >= value_w - 2 then
+                local key_repr
+                key_repr = function(k)
+                  return type(k) == 'string' and k or "[" .. tostring(repr(k, 1)) .. "]"
+                end
+                value_str = table.concat((function()
+                  local _accum_0 = { }
+                  local _len_0 = 1
+                  for k, v in pairs(value) do
+                    _accum_0[_len_0] = tostring(key_repr(k)) .. " = " .. tostring(repr(v, 1))
+                    _len_0 = _len_0 + 1
+                  end
+                  return _accum_0
+                end)(), "\n \n")
               end
             end
           end
@@ -571,19 +592,19 @@ ldb = {
         elseif "function" == _exp_0 then
           local info = debug.getinfo(value, 'nS')
           local s = ("function '%s' defined at %s:%s"):format(info.name or var_names[var_index], info.short_src, info.linedefined)
-          pads.values = Pad("(D)ata [function]", var_y, value_x, pads.vars.height, value_w, wrap_text(s, value_w - 2), function(self, i)
+          pads.values = Pad("(D)ata [" .. tostring(type_str) .. "]", var_y, value_x, pads.vars.height, value_w, wrap_text(s, value_w - 2), function(self, i)
             return color("green bold")
           end)
         elseif "number" == _exp_0 then
-          pads.values = Pad("(D)ata [number]", var_y, value_x, pads.vars.height, value_w, wrap_text(repr(value), value_w - 2), function(self, i)
+          pads.values = Pad("(D)ata [" .. tostring(type_str) .. "]", var_y, value_x, pads.vars.height, value_w, wrap_text(repr(value), value_w - 2), function(self, i)
             return color("magenta bold")
           end)
         elseif "boolean" == _exp_0 then
-          pads.values = Pad("(D)ata [boolean]", var_y, value_x, pads.vars.height, value_w, wrap_text(repr(value), value_w - 2), function(self, i)
+          pads.values = Pad("(D)ata [" .. tostring(type_str) .. "]", var_y, value_x, pads.vars.height, value_w, wrap_text(repr(value), value_w - 2), function(self, i)
             return value and color("green bold") or color("red bold")
           end)
         else
-          pads.values = Pad("(D)ata [" .. tostring(type(value)) .. "]", var_y, value_x, pads.vars.height, value_w, wrap_text(repr(value), value_w - 2), function(self, i)
+          pads.values = Pad("(D)ata [" .. tostring(type_str) .. "]", var_y, value_x, pads.vars.height, value_w, wrap_text(repr(value), value_w - 2), function(self, i)
             return color()
           end)
         end
