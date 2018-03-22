@@ -405,6 +405,7 @@ ldb = {
       C.doupdate()
       stdscr:getch()
     end
+    stdscr:keypad()
     stdscr:wbkgd(color())
     stdscr:clear()
     stdscr:refresh()
@@ -627,11 +628,11 @@ ldb = {
       C.doupdate()
       local c = stdscr:getch()
       local _exp_0 = c
-      if C.KEY_DOWN == _exp_0 or C.KEY_SF == _exp_0 or ("j"):byte() == _exp_0 then
+      if C.KEY_DOWN == _exp_0 or C.KEY_SR == _exp_0 or ("j"):byte() == _exp_0 then
         selected_pad:scroll(1, 0)
       elseif ('J'):byte() == _exp_0 then
         selected_pad:scroll(10, 0)
-      elseif C.KEY_UP == _exp_0 or C.KEY_SR == _exp_0 or ("k"):byte() == _exp_0 then
+      elseif C.KEY_UP == _exp_0 or C.KEY_SF == _exp_0 or ("k"):byte() == _exp_0 then
         selected_pad:scroll(-1, 0)
       elseif ('K'):byte() == _exp_0 then
         selected_pad:scroll(-10, 0)

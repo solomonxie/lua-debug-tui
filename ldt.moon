@@ -268,6 +268,7 @@ ldb = {
             C.doupdate!
             stdscr\getch!
 
+        stdscr\keypad!
         stdscr\wbkgd(color!)
         stdscr\clear!
         stdscr\refresh!
@@ -442,12 +443,12 @@ ldb = {
             C.doupdate!
             c = stdscr\getch!
             switch c
-                when C.KEY_DOWN, C.KEY_SF, ("j")\byte!
+                when C.KEY_DOWN, C.KEY_SR, ("j")\byte!
                     selected_pad\scroll(1,0)
                 when ('J')\byte!
                     selected_pad\scroll(10,0)
 
-                when C.KEY_UP, C.KEY_SR, ("k")\byte!
+                when C.KEY_UP, C.KEY_SF, ("k")\byte!
                     selected_pad\scroll(-1,0)
                 when ('K')\byte!
                     selected_pad\scroll(-10,0)
