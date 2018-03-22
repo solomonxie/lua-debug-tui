@@ -74,7 +74,7 @@ class Pad
 
         @columns = {}
         @column_widths = {}
-        @active_frame = color("white bold")
+        @active_frame = color("yellow bold")
         @inactive_frame = color("blue dim")
         @colors = {}
         for i=1,select('#',...)-1,2
@@ -209,7 +209,7 @@ class NumberedPad extends Pad
         col1 = select(1, ...)
         fmt = "%#{#tostring(#col1)}d"
         line_nums = [fmt\format(i) for i=1,#col1]
-        cols = {line_nums, ((i)=> i == @selected and color("white bold") or color("yellow")), ...}
+        cols = {line_nums, ((i)=> i == @selected and color() or color("yellow")), ...}
         super @label, @y, @x, height, width, unpack(cols)
 
 ok, to_lua = pcall -> require('moonscript.base').to_lua
@@ -310,16 +310,13 @@ ldb = {
                 table.insert(stack_locations, line)
                 max_filename = math.max(max_filename, #line)
                 max_fn_name = math.max(max_fn_name, #fn_name)
-            callstack = {}
             max_fn_name, max_filename = 0, 0
             for i=1,#stack_names do
-                fn_name = stack_names[i]
-                callstack[i] = {fn_name, stack_locations[i]}
-                max_fn_name = math.max(max_fn_name, #fn_name)
+                max_fn_name = math.max(max_fn_name, #stack_names[i])
                 max_filename = math.max(max_filename, #stack_locations[i])
 
-            stack_h = math.max(#callstack+2, math.floor(2/3*SCREEN_H))
-            stack_w = max_fn_name + 1 + max_filename
+            stack_h = math.max(#stack_names+2, math.floor(2/3*SCREEN_H))
+            stack_w = max_fn_name + 3 + max_filename
             pads.stack = Pad "(C)allstack",pads.err.height,SCREEN_W-stack_w,stack_h,stack_w,
                 stack_names, ((i)=> (i == @selected) and color("black on green") or color("green bold")),
                 stack_locations, ((i)=> (i == @selected) and color("black on cyan") or color("cyan bold"))
@@ -337,8 +334,8 @@ ldb = {
                         return if i == line_no and i == @selected then color("yellow on red bold")
                         elseif i == line_no then color("yellow on red")
                         elseif err_lines["#{filename}:#{i}"] == true then color("red on black bold")
-                        elseif i == @selected then color("black on white")
-                        else color("white")
+                        elseif i == @selected then color("reverse")
+                        else color()
                 pads.src\select(line_no)
             else
                 lines = {}
@@ -384,7 +381,7 @@ ldb = {
                 switch type(value)
                     when "string"
                         pads.values = Pad "(D)ata [string]",var_y,value_x,pads.vars.height,value_w,
-                            wrap_text(value, value_w-2), (i)=>color("white bold")
+                            wrap_text(value, value_w-2), (i)=>color()
                     when "table"
                         type_str, value_str = 'table', repr(value)
                         if mt = getmetatable(value)
@@ -440,6 +437,8 @@ ldb = {
             for _,p in pairs(pads)
                 if p.dirty
                     p\refresh!
+            s = " press 'q' to quit "
+            stdscr\mvaddstr(math.floor(SCREEN_H - 1), math.floor((SCREEN_W-#s)), s)
             C.doupdate!
             c = stdscr\getch!
             switch c

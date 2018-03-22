@@ -231,7 +231,7 @@ do
       self.selected = nil
       self.columns = { }
       self.column_widths = { }
-      self.active_frame = color("white bold")
+      self.active_frame = color("yellow bold")
       self.inactive_frame = color("blue dim")
       self.colors = { }
       for i = 1, select('#', ...) - 1, 2 do
@@ -301,7 +301,7 @@ do
       local cols = {
         line_nums,
         (function(self, i)
-          return i == self.selected and color("white bold") or color("yellow")
+          return i == self.selected and color() or color("yellow")
         end),
         ...
       }
@@ -456,19 +456,13 @@ ldb = {
         max_filename = math.max(max_filename, #line)
         max_fn_name = math.max(max_fn_name, #fn_name)
       end
-      local callstack = { }
       max_fn_name, max_filename = 0, 0
       for i = 1, #stack_names do
-        local fn_name = stack_names[i]
-        callstack[i] = {
-          fn_name,
-          stack_locations[i]
-        }
-        max_fn_name = math.max(max_fn_name, #fn_name)
+        max_fn_name = math.max(max_fn_name, #stack_names[i])
         max_filename = math.max(max_filename, #stack_locations[i])
       end
-      local stack_h = math.max(#callstack + 2, math.floor(2 / 3 * SCREEN_H))
-      local stack_w = max_fn_name + 1 + max_filename
+      local stack_h = math.max(#stack_names + 2, math.floor(2 / 3 * SCREEN_H))
+      local stack_w = max_fn_name + 3 + max_filename
       pads.stack = Pad("(C)allstack", pads.err.height, SCREEN_W - stack_w, stack_h, stack_w, stack_names, (function(self, i)
         return (i == self.selected) and color("black on green") or color("green bold")
       end), stack_locations, (function(self, i)
@@ -494,9 +488,9 @@ ldb = {
           elseif err_lines[tostring(filename) .. ":" .. tostring(i)] == true then
             return color("red on black bold")
           elseif i == self.selected then
-            return color("black on white")
+            return color("reverse")
           else
-            return color("white")
+            return color()
           end
         end)
         return pads.src:select(line_no)
@@ -554,7 +548,7 @@ ldb = {
         local _exp_0 = type(value)
         if "string" == _exp_0 then
           pads.values = Pad("(D)ata [string]", var_y, value_x, pads.vars.height, value_w, wrap_text(value, value_w - 2), function(self, i)
-            return color("white bold")
+            return color()
           end)
         elseif "table" == _exp_0 then
           local type_str, value_str = 'table', repr(value)
@@ -625,6 +619,8 @@ ldb = {
           p:refresh()
         end
       end
+      local s = " press 'q' to quit "
+      stdscr:mvaddstr(math.floor(SCREEN_H - 1), math.floor((SCREEN_W - #s)), s)
       C.doupdate()
       local c = stdscr:getch()
       local _exp_0 = c
