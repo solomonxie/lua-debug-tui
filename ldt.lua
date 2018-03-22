@@ -167,7 +167,7 @@ do
         elseif self.selected < self.scroll_y + scrolloff then
           self.scroll_y = self.selected - scrolloff
         end
-        self.scroll_y = math.max(1, math.min(#self.columns[1], self.scroll_y))
+        self.scroll_y = math.max(1, math.min(self._height, self.scroll_y))
       end
       if self.scroll_y == old_y then
         local w = math.min(self.width - 2, self._width)
@@ -190,9 +190,9 @@ do
       if self.selected ~= nil then
         self:select(self.selected + (dy or 0))
       else
-        self.scroll_y = math.max(1, math.min(self._height - self.height, self.scroll_y + (dy or 0)))
+        self.scroll_y = math.max(1, math.min(self._height - (self.height - 2 - 1), self.scroll_y + (dy or 0)))
       end
-      self.scroll_x = math.max(1, math.min(self._width - self.width, self.scroll_x + (dx or 0)))
+      self.scroll_x = math.max(1, math.min(self._width - (self.width - 2 - 1), self.scroll_x + (dx or 0)))
       if self.scroll_y ~= old_y or self.scroll_x ~= old_x then
         self.dirty = true
       end
@@ -421,6 +421,7 @@ ldb = {
       pads.err:refresh()
     end
     local stack_locations = { }
+    local err_lines = { }
     do
       local stack_names = { }
       local max_filename, max_fn_name = 0, 0
@@ -449,6 +450,7 @@ ldb = {
         else
           line = "???"
         end
+        err_lines[line] = true
         table.insert(stack_locations, line)
         max_filename = math.max(max_filename, #line)
         max_fn_name = math.max(max_fn_name, #fn_name)
@@ -486,12 +488,15 @@ ldb = {
         pads.src = NumberedPad("(S)ource Code", pads.err.height, 0, pads.stack.height, pads.stack.x, src_lines, function(self, i)
           if i == line_no and i == self.selected then
             return color("yellow on red bold")
+          elseif i == line_no then
+            return color("yellow on red")
+          elseif err_lines[tostring(filename) .. ":" .. tostring(i)] == true then
+            return color("red on black bold")
           elseif i == self.selected then
             return color("black on white")
-          elseif i == line_no then
-            return color("red on black bold")
+          else
+            return color("white")
           end
-          return color("white")
         end)
         return pads.src:select(line_no)
       else
@@ -523,12 +528,14 @@ ldb = {
           break
         end
         table.insert(var_names, tostring(name))
-        if type(value) == 'function' then
-          local info = debug.getinfo(value, 'nS')
-          table.insert(values, repr(info))
-        else
-          table.insert(values, repr(value))
-        end
+        table.insert(values, value)
+        _ = [[                if type(value) == 'function'
+                    info = debug.getinfo(value, 'nS')
+                    --values\add_line(("function: %s @ %s:%s")\format(info.name or '???', info.short_src, info.linedefined))
+                    table.insert(values, repr(info))
+                else
+                    table.insert(values, repr(value))
+                    ]]
       end
       local var_y = pads.stack.y + pads.stack.height
       local var_x = 0
@@ -537,14 +544,51 @@ ldb = {
         return i == self.selected and color('reverse') or color()
       end))
       pads.vars.on_select = function(self, var_index)
+        if var_index == nil then
+          return 
+        end
         local value_x = pads.vars.x + pads.vars.width
         local value_w = SCREEN_W - (value_x)
-        if var_index then
-          pads.values = Pad("(D)ata", var_y, value_x, pads.vars.height, value_w, wrap_text(values[var_index], value_w - 2), function(self, i)
-            return color()
+        local value = assert(values[var_index], "No value found for " .. tostring(var_index))
+        local _exp_0 = type(value)
+        if "string" == _exp_0 then
+          pads.values = Pad("(D)ata [string]", var_y, value_x, pads.vars.height, value_w, wrap_text(value, value_w - 2), function(self, i)
+            return color("white bold")
+          end)
+        elseif "table" == _exp_0 then
+          local type_str, value_str = 'table', repr(value)
+          do
+            local mt = getmetatable(value)
+            if mt then
+              if mt.__class and mt.__class.__name then
+                type_str = mt.__class.__name
+              else
+                type_str = 'table with metatable'
+              end
+              if mt.__tostring then
+                value_str = tostring(value)
+              end
+            end
+          end
+          pads.values = Pad("(D)ata [" .. tostring(type_str) .. "]", var_y, value_x, pads.vars.height, value_w, wrap_text(value_str, value_w - 2), function(self, i)
+            return color("cyan bold")
+          end)
+        elseif "function" == _exp_0 then
+          local info = debug.getinfo(value, 'nS')
+          local s = ("function '%s' defined at %s:%s"):format(info.name or var_names[var_index], info.short_src, info.linedefined)
+          pads.values = Pad("(D)ata [function]", var_y, value_x, pads.vars.height, value_w, wrap_text(s, value_w - 2), function(self, i)
+            return color("green bold")
+          end)
+        elseif "number" == _exp_0 then
+          pads.values = Pad("(D)ata [number]", var_y, value_x, pads.vars.height, value_w, wrap_text(repr(value), value_w - 2), function(self, i)
+            return color("magenta bold")
+          end)
+        elseif "boolean" == _exp_0 then
+          pads.values = Pad("(D)ata [boolean]", var_y, value_x, pads.vars.height, value_w, wrap_text(repr(value), value_w - 2), function(self, i)
+            return value and color("green bold") or color("red bold")
           end)
         else
-          pads.values = Pad("(D)ata", var_y, value_x, pads.vars.height, value_w, { }, function(self, i)
+          pads.values = Pad("(D)ata [" .. tostring(type(value)) .. "]", var_y, value_x, pads.vars.height, value_w, wrap_text(repr(value), value_w - 2), function(self, i)
             return color()
           end)
         end

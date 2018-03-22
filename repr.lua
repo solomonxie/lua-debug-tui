@@ -26,24 +26,19 @@ local function repr(x, depth)
     depth = depth - 1
     local x_type = type(x)
     if x_type == 'table' then
-        if getmetatable(x) then
-            -- If this object has a weird metatable, then don't pretend like it's a regular table
-            return tostring(x)
-        else
-            local ret = {}
-            local i = 1
-            for k, v in pairs(x) do
-                if k == i then
-                    ret[#ret+1] = repr(x[i], depth)
-                    i = i + 1
-                elseif type(k) == 'string' and k:match("[_a-zA-Z][_a-zA-Z0-9]*") then
-                    ret[#ret+1] = k.."= "..repr(v,depth)
-                else
-                    ret[#ret+1] = "["..repr(k,depth).."]= "..repr(v,depth)
-                end
+        local ret = {}
+        local i = 1
+        for k, v in pairs(x) do
+            if k == i then
+                ret[#ret+1] = repr(x[i], depth)
+                i = i + 1
+            elseif type(k) == 'string' and k:match("[_a-zA-Z][_a-zA-Z0-9]*") then
+                ret[#ret+1] = k.."= "..repr(v,depth)
+            else
+                ret[#ret+1] = "["..repr(k,depth).."]= "..repr(v,depth)
             end
-            return "{"..table.concat(ret, ", ").."}"
         end
+        return "{"..table.concat(ret, ", ").."}"
     elseif x_type == 'string' then
         if x == "\n" then
             return "'\\n'"

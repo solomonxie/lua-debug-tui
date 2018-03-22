@@ -157,7 +157,7 @@ class Pad
                 @scroll_y = @selected - (@height-2) + scrolloff
             elseif @selected < @scroll_y + scrolloff
                 @scroll_y = @selected - scrolloff
-            @scroll_y = math.max(1, math.min(#@columns[1], @scroll_y))
+            @scroll_y = math.max(1, math.min(@_height, @scroll_y))
 
         if @scroll_y == old_y
             w = math.min(@width-2,@_width)
@@ -176,8 +176,8 @@ class Pad
         if @selected != nil
             @select(@selected + (dy or 0))
         else
-            @scroll_y = math.max(1, math.min(@_height-@height, @scroll_y+(dy or 0)))
-        @scroll_x = math.max(1, math.min(@_width-@width, @scroll_x+(dx or 0)))
+            @scroll_y = math.max(1, math.min(@_height-(@height-2-1), @scroll_y+(dy or 0)))
+        @scroll_x = math.max(1, math.min(@_width-(@width-2-1), @scroll_x+(dx or 0)))
         if @scroll_y != old_y or @scroll_x != old_x
             @dirty = true
     
@@ -283,6 +283,7 @@ ldb = {
             pads.err\refresh!
 
         stack_locations = {}
+        err_lines = {}
         do -- Stack pad
             stack_names = {}
             max_filename, max_fn_name = 0, 0
@@ -304,6 +305,7 @@ ldb = {
                         info.short_src..":"..info.currentline
                 else
                     "???"
+                err_lines[line] = true
                 table.insert(stack_locations, line)
                 max_filename = math.max(max_filename, #line)
                 max_fn_name = math.max(max_fn_name, #fn_name)
@@ -331,10 +333,11 @@ ldb = {
                     table.insert src_lines, line
                 pads.src = NumberedPad "(S)ource Code", pads.err.height,0,
                     pads.stack.height,pads.stack.x, src_lines, (i)=>
-                        if i == line_no and i == @selected then return color("yellow on red bold")
-                        elseif i == @selected then return color("black on white")
-                        elseif i == line_no then return color("red on black bold")
-                        return color("white")
+                        return if i == line_no and i == @selected then color("yellow on red bold")
+                        elseif i == line_no then color("yellow on red")
+                        elseif err_lines["#{filename}:#{i}"] == true then color("red on black bold")
+                        elseif i == @selected then color("black on white")
+                        else color("white")
                 pads.src\select(line_no)
             else
                 lines = {}
@@ -355,12 +358,15 @@ ldb = {
                 name, value = debug.getlocal(callstack_min+stack_index-1, loc)
                 if value == nil then break
                 table.insert(var_names, tostring(name))
+                table.insert(values, value)
+                [[
                 if type(value) == 'function'
                     info = debug.getinfo(value, 'nS')
                     --values\add_line(("function: %s @ %s:%s")\format(info.name or '???', info.short_src, info.linedefined))
                     table.insert(values, repr(info))
                 else
                     table.insert(values, repr(value))
+                    ]]
             
             var_y = pads.stack.y + pads.stack.height
             var_x = 0
@@ -369,13 +375,40 @@ ldb = {
             pads.vars = Pad "(V)ars", var_y,var_x,height,AUTO,var_names, ((i)=> i == @selected and color('reverse') or color())
 
             pads.vars.on_select = (var_index)=>
+                if var_index == nil then return
                 value_x = pads.vars.x+pads.vars.width
                 value_w = SCREEN_W-(value_x)
+                value = assert(values[var_index], "No value found for #{var_index}")
                 -- Show single value:
-                if var_index
-                    pads.values = Pad "(D)ata",var_y,value_x,pads.vars.height,value_w,wrap_text(values[var_index], value_w-2), (i)=>color()
-                else
-                    pads.values = Pad "(D)ata",var_y,value_x,pads.vars.height,value_w,{}, (i)=>color()
+                switch type(value)
+                    when "string"
+                        pads.values = Pad "(D)ata [string]",var_y,value_x,pads.vars.height,value_w,
+                            wrap_text(value, value_w-2), (i)=>color("white bold")
+                    when "table"
+                        type_str, value_str = 'table', repr(value)
+                        if mt = getmetatable(value)
+                            type_str = if mt.__class and mt.__class.__name then mt.__class.__name
+                            else 'table with metatable'
+                            if mt.__tostring
+                                value_str = tostring(value)
+                        pads.values = Pad "(D)ata [#{type_str}]",var_y,value_x,pads.vars.height,value_w,
+                            wrap_text(value_str, value_w-2), (i)=>color("cyan bold")
+                    when "function"
+                        info = debug.getinfo(value, 'nS')
+                        s = ("function '%s' defined at %s:%s")\format info.name or var_names[var_index],
+                            info.short_src, info.linedefined
+                        pads.values = Pad "(D)ata [function]",var_y,value_x,pads.vars.height,value_w,
+                            wrap_text(s, value_w-2), (i)=>color("green bold")
+                    when "number"
+                        pads.values = Pad "(D)ata [number]",var_y,value_x,pads.vars.height,value_w,
+                            wrap_text(repr(value), value_w-2), (i)=>color("magenta bold")
+                    when "boolean"
+                        pads.values = Pad "(D)ata [boolean]",var_y,value_x,pads.vars.height,value_w,
+                            wrap_text(repr(value), value_w-2), (i)=> value and color("green bold") or color("red bold")
+                    else
+                        pads.values = Pad "(D)ata [#{type(value)}]",var_y,value_x,pads.vars.height,value_w,
+                            wrap_text(repr(value), value_w-2), (i)=>color()
+
                 collectgarbage()
                 collectgarbage()
 
