@@ -6,6 +6,8 @@ your code crashes, or you call `ldt.breakpoint()`. Moonscript is fully supported
 callstack and source code panes will display the correct source for functions written in
 Moonscript.
 
+![preview][preview.png]
+
 ## Requirements
 
 This library uses Curses via the [lcurses](https://github.com/rrthomas/lcurses) library
