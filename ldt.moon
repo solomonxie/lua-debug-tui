@@ -4,6 +4,9 @@ repr = require 'repr'
 local ldb
 AUTO = {} -- Singleton
 
+_error = error
+_assert = assert
+
 -- Return the callstack index of the code that actually caused an error and the max index
 callstack_range = ->
     min, max = 0, -1
@@ -57,7 +60,7 @@ do
     ]]
     C.COLOR_DEFAULT = -1
     color = (s="default")->
-        t = assert(color_lang\match(s), "Invalid color: #{s}")
+        t = _assert(color_lang\match(s), "Invalid color: #{s}")
         if t.fg then t.fg = C["COLOR_"..t.fg\upper!]
         if t.bg then t.bg = C["COLOR_"..t.bg\upper!]
         c = make_color(t.fg, t.bg)
@@ -83,7 +86,7 @@ class Pad
             for chunk in *col do w = math.max(w, #chunk)
             table.insert(@column_widths, w)
             color_fn = select(i+1,...) or ((i)=>color())
-            assert(type(color_fn) == 'function', "Invalid color function type: #{type color_fn}")
+            _assert(type(color_fn) == 'function', "Invalid color function type: #{type color_fn}")
             table.insert(@colors, color_fn)
 
         @configure_size height, width
@@ -113,7 +116,7 @@ class Pad
             @width = @_width + 2
 
     setup_chstr: (i)=>
-        chstr = assert(@chstrs[i], "Failed to find chstrs[#{repr i}]")
+        chstr = _assert(@chstrs[i], "Failed to find chstrs[#{repr i}]")
         x = 0
         for c=1,#@columns
             attr = @colors[c](@, i)
@@ -537,12 +540,19 @@ ldb = {
     breakpoint: ->
         return xpcall(ldb.run_debugger, err_hand, "Breakpoint triggered!")
 
-    hijack_error: ->
-        export error
+    hijack: ->
+        export error, assert
         error = (err_msg)->
             xpcall(ldb.run_debugger, err_hand, err_msg)
             print(debug.traceback(err_msg, 2))
             os.exit(2)
+
+        assert = (condition, err_msg)->
+            if not condition
+                err_msg or= 'Assertion failed!'
+                xpcall(ldb.run_debugger, err_hand, err_msg)
+                print(debug.traceback(err_msg, 2))
+                os.exit(2)
 
 }
 return ldb

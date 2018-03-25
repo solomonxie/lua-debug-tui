@@ -3,6 +3,8 @@ local re = require('re')
 local repr = require('repr')
 local ldb
 local AUTO = { }
+local _error = error
+local _assert = assert
 local callstack_range
 callstack_range = function()
   local min, max = 0, -1
@@ -74,7 +76,7 @@ do
     if s == nil then
       s = "default"
     end
-    local t = assert(color_lang:match(s), "Invalid color: " .. tostring(s))
+    local t = _assert(color_lang:match(s), "Invalid color: " .. tostring(s))
     if t.fg then
       t.fg = C["COLOR_" .. t.fg:upper()]
     end
@@ -115,7 +117,7 @@ do
       end
     end,
     setup_chstr = function(self, i)
-      local chstr = assert(self.chstrs[i], "Failed to find chstrs[" .. tostring(repr(i)) .. "]")
+      local chstr = _assert(self.chstrs[i], "Failed to find chstrs[" .. tostring(repr(i)) .. "]")
       local x = 0
       for c = 1, #self.columns do
         local attr = self.colors[c](self, i)
@@ -245,7 +247,7 @@ do
         local color_fn = select(i + 1, ...) or (function(self, i)
           return color()
         end)
-        assert(type(color_fn) == 'function', "Invalid color function type: " .. tostring(type(color_fn)))
+        _assert(type(color_fn) == 'function', "Invalid color function type: " .. tostring(type(color_fn)))
         table.insert(self.colors, color_fn)
       end
       self:configure_size(height, width)
@@ -733,11 +735,19 @@ ldb = {
   breakpoint = function()
     return xpcall(ldb.run_debugger, err_hand, "Breakpoint triggered!")
   end,
-  hijack_error = function()
+  hijack = function()
     error = function(err_msg)
       xpcall(ldb.run_debugger, err_hand, err_msg)
       print(debug.traceback(err_msg, 2))
       return os.exit(2)
+    end
+    assert = function(condition, err_msg)
+      if not condition then
+        err_msg = err_msg or 'Assertion failed!'
+        xpcall(ldb.run_debugger, err_hand, err_msg)
+        print(debug.traceback(err_msg, 2))
+        return os.exit(2)
+      end
     end
   end
 }
