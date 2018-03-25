@@ -28,7 +28,7 @@ a nil value do not call `error()`, so the debugger won't get triggered.
 ## Navigation
 
 * Press 'q' to quit
-* Arrow keys or h/j/k/l for movement within the active pane (yellow border); scroll wheel also works, but only for vertical scrolling.
+* Arrow keys or h/j/k/l for movement within the active pane (yellow border); scroll wheel also works, but only for vertical scrolling. Shift+h/j/k/l moves 10 lines at a time.
 * Press 'c' to select the call stack pane
 * Press 's' to select the source code pane (showing the source code for the file of the function selected in the callstack pane)
 * Press 'v' to select the variables pane (showing the variables at the selected level of the callstack)
