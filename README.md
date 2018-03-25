@@ -6,7 +6,7 @@ your code crashes, or you call `ldt.breakpoint()`. Moonscript is fully supported
 callstack and source code panes will display the correct source for functions written in
 Moonscript.
 
-![preview][preview.png]
+![preview](preview.png)
 
 ## Requirements
 
