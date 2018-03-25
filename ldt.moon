@@ -1,9 +1,8 @@
 C = require "curses"
 re = require 're'
 repr = require 'repr'
-local ldb, stdscr
-AUTO = {}
-log = io.open("output.log", "w")
+local ldb
+AUTO = {} -- Singleton
 
 -- Return the callstack index of the code that actually caused an error and the max index
 callstack_range = ->
@@ -88,7 +87,6 @@ class Pad
             table.insert(@colors, color_fn)
 
         @configure_size height, width
-        log\write("New pad: #{@height},#{@width}  #{@_height},#{@_width}\n")
         @_frame = C.newwin(@height, @width, @y, @x)
         @_frame\immedok(true)
         @_pad = C.newpad(@_height, @_width)
@@ -241,7 +239,6 @@ err_hand = (err)->
 
 ldb = {
     run_debugger: (err_msg)->
-        export stdscr, SCREEN_H, SCREEN_W
         stdscr = C.initscr!
         SCREEN_H, SCREEN_W = stdscr\getmaxyx!
 
@@ -517,9 +514,11 @@ ldb = {
                     for _,pad in pairs(pads) do pad\refresh!
                 
                 when C.KEY_RESIZE
+                    SCREEN_H, SCREEN_W = stdscr\getmaxyx!
                     stdscr\clear!
                     stdscr\refresh!
-                    for _,pad in pairs(pads) do pad\refresh!
+                    for _,pad in pairs(pads) do pad\refresh(true)
+                    C.doupdate!
 
                 when ('q')\byte!, ("Q")\byte!
                     pads = {}

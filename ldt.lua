@@ -1,9 +1,8 @@
 local C = require("curses")
 local re = require('re')
 local repr = require('repr')
-local ldb, stdscr
+local ldb
 local AUTO = { }
-local log = io.open("output.log", "w")
 local callstack_range
 callstack_range = function()
   local min, max = 0, -1
@@ -250,7 +249,6 @@ do
         table.insert(self.colors, color_fn)
       end
       self:configure_size(height, width)
-      log:write("New pad: " .. tostring(self.height) .. "," .. tostring(self.width) .. "  " .. tostring(self._height) .. "," .. tostring(self._width) .. "\n")
       self._frame = C.newwin(self.height, self.width, self.y, self.x)
       self._frame:immedok(true)
       self._pad = C.newpad(self._height, self._width)
@@ -376,8 +374,8 @@ err_hand = function(err)
 end
 ldb = {
   run_debugger = function(err_msg)
-    stdscr = C.initscr()
-    SCREEN_H, SCREEN_W = stdscr:getmaxyx()
+    local stdscr = C.initscr()
+    local SCREEN_H, SCREEN_W = stdscr:getmaxyx()
     C.cbreak()
     C.echo(false)
     C.nl(false)
@@ -708,11 +706,13 @@ ldb = {
           pad:refresh()
         end
       elseif C.KEY_RESIZE == _exp_0 then
+        SCREEN_H, SCREEN_W = stdscr:getmaxyx()
         stdscr:clear()
         stdscr:refresh()
         for _, pad in pairs(pads) do
-          pad:refresh()
+          pad:refresh(true)
         end
+        C.doupdate()
       elseif ('q'):byte() == _exp_0 or ("Q"):byte() == _exp_0 then
         pads = { }
         C.endwin()
