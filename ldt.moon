@@ -113,7 +113,7 @@ class Pad
             @width = @_width + 2
 
     setup_chstr: (i)=>
-        chstr = @chstrs[i]
+        chstr = assert(@chstrs[i], "Failed to find chstrs[#{repr i}]")
         x = 0
         for c=1,#@columns
             attr = @colors[c](@, i)
@@ -239,6 +239,7 @@ err_hand = (err)->
 
 ldb = {
     run_debugger: (err_msg)->
+        err_msg or= ''
         stdscr = C.initscr!
         SCREEN_H, SCREEN_W = stdscr\getmaxyx!
 
@@ -329,7 +330,9 @@ ldb = {
                         elseif i == @selected then color("reverse")
                         else color()
                     for line,_ in pairs(err_lines)
-                        pads.src\setup_chstr(tonumber(line\match("[^:]*:(%d*).*")))
+                        _filename, i = line\match("([^:]*):(%d*).*")
+                        if _filename == filename and tonumber(i)
+                            pads.src\setup_chstr(tonumber(i))
                     pads.src\select(line_no)
                     return
                 else
@@ -398,18 +401,19 @@ ldb = {
                         value_str = repr(value, 3)
                         mt = getmetatable(value)
                         if mt
-                            type_str = if mt.__class and mt.__class.__name then mt.__class.__name
-                            elseif value.__base and value.__name then "class #{value.__name}"
+                            type_str = if rawget(mt, '__class') and rawget(rawget(mt, '__class'), '__name')
+                                rawget(rawget(mt, '__class'), '__name')
+                            elseif rawget(value, '__base') and rawget(value, '__name') then "class #{rawget(value,'__name')}"
                             else 'table with metatable'
-                            if mt.__tostring
+                            if rawget(mt, '__tostring')
                                 value_str = tostring(value)
                             else
-                                if value.__base and value.__name
-                                    value = value.__base
-                                    value_str = repr(value, 2)
+                                if rawget(value, '__base') and rawget(value, '__name')
+                                    value = rawget(value, '__base')
+                                    value_str = repr(value, 3)
                                 if #value_str >= value_w-2
-                                    key_repr = (k)-> type(k) == 'string' and k or "[#{repr(k,1)}]"
-                                    value_str = table.concat ["#{key_repr k} = #{repr v,1}" for k,v in pairs(value)], "\n \n"
+                                    key_repr = (k)-> type(k) == 'string' and k or "[#{repr(k,2)}]"
+                                    value_str = table.concat ["#{key_repr k} = #{repr v,2}" for k,v in pairs(value)], "\n \n"
 
                         pads.values = Pad "(D)ata [#{type_str}]",var_y,value_x,pads.vars.height,value_w,
                             wrap_text(value_str, value_w-2), (i)=>color("cyan bold")

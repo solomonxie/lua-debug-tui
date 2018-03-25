@@ -115,7 +115,7 @@ do
       end
     end,
     setup_chstr = function(self, i)
-      local chstr = self.chstrs[i]
+      local chstr = assert(self.chstrs[i], "Failed to find chstrs[" .. tostring(repr(i)) .. "]")
       local x = 0
       for c = 1, #self.columns do
         local attr = self.colors[c](self, i)
@@ -374,6 +374,7 @@ err_hand = function(err)
 end
 ldb = {
   run_debugger = function(err_msg)
+    err_msg = err_msg or ''
     local stdscr = C.initscr()
     local SCREEN_H, SCREEN_W = stdscr:getmaxyx()
     C.cbreak()
@@ -486,7 +487,10 @@ ldb = {
             end
           end
           for line, _ in pairs(err_lines) do
-            pads.src:setup_chstr(tonumber(line:match("[^:]*:(%d*).*")))
+            local _filename, i = line:match("([^:]*):(%d*).*")
+            if _filename == filename and tonumber(i) then
+              pads.src:setup_chstr(tonumber(i))
+            end
           end
           pads.src:select(line_no)
           return 
@@ -576,30 +580,30 @@ ldb = {
           local value_str = repr(value, 3)
           local mt = getmetatable(value)
           if mt then
-            if mt.__class and mt.__class.__name then
-              type_str = mt.__class.__name
-            elseif value.__base and value.__name then
-              type_str = "class " .. tostring(value.__name)
+            if rawget(mt, '__class') and rawget(rawget(mt, '__class'), '__name') then
+              type_str = rawget(rawget(mt, '__class'), '__name')
+            elseif rawget(value, '__base') and rawget(value, '__name') then
+              type_str = "class " .. tostring(rawget(value, '__name'))
             else
               type_str = 'table with metatable'
             end
-            if mt.__tostring then
+            if rawget(mt, '__tostring') then
               value_str = tostring(value)
             else
-              if value.__base and value.__name then
-                value = value.__base
-                value_str = repr(value, 2)
+              if rawget(value, '__base') and rawget(value, '__name') then
+                value = rawget(value, '__base')
+                value_str = repr(value, 3)
               end
               if #value_str >= value_w - 2 then
                 local key_repr
                 key_repr = function(k)
-                  return type(k) == 'string' and k or "[" .. tostring(repr(k, 1)) .. "]"
+                  return type(k) == 'string' and k or "[" .. tostring(repr(k, 2)) .. "]"
                 end
                 value_str = table.concat((function()
                   local _accum_0 = { }
                   local _len_0 = 1
                   for k, v in pairs(value) do
-                    _accum_0[_len_0] = tostring(key_repr(k)) .. " = " .. tostring(repr(v, 1))
+                    _accum_0[_len_0] = tostring(key_repr(k)) .. " = " .. tostring(repr(v, 2))
                     _len_0 = _len_0 + 1
                   end
                   return _accum_0
