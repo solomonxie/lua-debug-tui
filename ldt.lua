@@ -461,7 +461,7 @@ ldb = {
         max_filename = math.max(max_filename, #stack_locations[i])
       end
       local stack_h = math.max(#stack_names + 2, math.floor(2 / 3 * SCREEN_H))
-      local stack_w = max_fn_name + 3 + max_filename
+      local stack_w = math.min(max_fn_name + 3 + max_filename, math.floor(1 / 3 * SCREEN_W))
       pads.stack = Pad("(C)allstack", pads.err.height, SCREEN_W - stack_w, stack_h, stack_w, stack_names, (function(self, i)
         return (i == self.selected) and color("black on green") or color("green bold")
       end), stack_locations, (function(self, i)
@@ -735,7 +735,9 @@ ldb = {
   end,
   hijack_error = function()
     error = function(err_msg)
-      return xpcall(ldb.run_debugger, err_hand, err_msg)
+      xpcall(ldb.run_debugger, err_hand, err_msg)
+      print(debug.traceback(err_msg, 2))
+      return os.exit(2)
     end
   end
 }

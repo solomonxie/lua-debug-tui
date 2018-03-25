@@ -314,7 +314,7 @@ ldb = {
                 max_filename = math.max(max_filename, #stack_locations[i])
 
             stack_h = math.max(#stack_names+2, math.floor(2/3*SCREEN_H))
-            stack_w = max_fn_name + 3 + max_filename
+            stack_w = math.min(max_fn_name + 3 + max_filename, math.floor(1/3*SCREEN_W))
             pads.stack = Pad "(C)allstack",pads.err.height,SCREEN_W-stack_w,stack_h,stack_w,
                 stack_names, ((i)=> (i == @selected) and color("black on green") or color("green bold")),
                 stack_locations, ((i)=> (i == @selected) and color("black on cyan") or color("cyan bold"))
@@ -540,6 +540,9 @@ ldb = {
     hijack_error: ->
         export error
         error = (err_msg)->
-            return xpcall(ldb.run_debugger, err_hand, err_msg)
+            xpcall(ldb.run_debugger, err_hand, err_msg)
+            print(debug.traceback(err_msg, 2))
+            os.exit(2)
+
 }
 return ldb
