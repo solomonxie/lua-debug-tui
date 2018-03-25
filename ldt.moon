@@ -323,7 +323,20 @@ ldb = {
         
         show_src = (filename, line_no)->
             if pads.src
-                pads.src\erase!
+                if pads.src.filename == filename
+                    pads.src\select(line_no)
+                    pads.src.colors[2] = (i)=>
+                        return if i == line_no and i == @selected then color("yellow on red bold")
+                        elseif i == line_no then color("yellow on red")
+                        elseif err_lines["#{filename}:#{i}"] == true then color("red on black bold")
+                        elseif i == @selected then color("reverse")
+                        else color()
+                    for line,_ in pairs(err_lines)
+                        pads.src\setup_chstr(tonumber(line\match("[^:]*:(%d*).*")))
+                    pads.src\select(line_no)
+                    return
+                else
+                    pads.src\erase!
             file = file_cache[filename]
             if file
                 src_lines = {}
@@ -344,6 +357,7 @@ ldb = {
                 s = (" ")\rep(math.floor((pads.stack.x-2-#s)/2))..s
                 table.insert(lines, s)
                 pads.src = Pad "(S)ource Code", pads.err.height,0,pads.stack.height,pads.stack.x,lines, ->color("red")
+            pads.src.filename = filename
         
         show_vars = (stack_index)->
             if pads.vars
@@ -499,6 +513,11 @@ ldb = {
                     C.curs_set(0)
                     C.start_color!
                     C.use_default_colors!
+                    stdscr\clear!
+                    stdscr\refresh!
+                    for _,pad in pairs(pads) do pad\refresh!
+                
+                when C.KEY_RESIZE
                     stdscr\clear!
                     stdscr\refresh!
                     for _,pad in pairs(pads) do pad\refresh!

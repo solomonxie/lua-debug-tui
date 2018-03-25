@@ -472,7 +472,29 @@ ldb = {
     local show_src
     show_src = function(filename, line_no)
       if pads.src then
-        pads.src:erase()
+        if pads.src.filename == filename then
+          pads.src:select(line_no)
+          pads.src.colors[2] = function(self, i)
+            if i == line_no and i == self.selected then
+              return color("yellow on red bold")
+            elseif i == line_no then
+              return color("yellow on red")
+            elseif err_lines[tostring(filename) .. ":" .. tostring(i)] == true then
+              return color("red on black bold")
+            elseif i == self.selected then
+              return color("reverse")
+            else
+              return color()
+            end
+          end
+          for line, _ in pairs(err_lines) do
+            pads.src:setup_chstr(tonumber(line:match("[^:]*:(%d*).*")))
+          end
+          pads.src:select(line_no)
+          return 
+        else
+          pads.src:erase()
+        end
       end
       local file = file_cache[filename]
       if file then
@@ -493,7 +515,7 @@ ldb = {
             return color()
           end
         end)
-        return pads.src:select(line_no)
+        pads.src:select(line_no)
       else
         local lines = { }
         for i = 1, math.floor(pads.stack.height / 2) - 1 do
@@ -506,6 +528,7 @@ ldb = {
           return color("red")
         end)
       end
+      pads.src.filename = filename
     end
     local show_vars
     show_vars = function(stack_index)
@@ -682,6 +705,12 @@ ldb = {
         C.curs_set(0)
         C.start_color()
         C.use_default_colors()
+        stdscr:clear()
+        stdscr:refresh()
+        for _, pad in pairs(pads) do
+          pad:refresh()
+        end
+      elseif C.KEY_RESIZE == _exp_0 then
         stdscr:clear()
         stdscr:refresh()
         for _, pad in pairs(pads) do
