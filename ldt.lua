@@ -659,13 +659,10 @@ ldb = {
     select_pad(pads.src)
     while true do
       for _, p in pairs(pads) do
-        if p.dirty then
-          p:refresh()
-        end
+        p:refresh()
       end
       local s = " press 'q' to quit "
       stdscr:mvaddstr(math.floor(SCREEN_H - 1), math.floor((SCREEN_W - #s)), s)
-      C.doupdate()
       local c = stdscr:getch()
       local _exp_0 = c
       if C.KEY_DOWN == _exp_0 or C.KEY_SR == _exp_0 or ("j"):byte() == _exp_0 then

@@ -460,11 +460,10 @@ ldb = {
 
         while true
             for _,p in pairs(pads)
-                if p.dirty
-                    p\refresh!
+                p\refresh!
             s = " press 'q' to quit "
             stdscr\mvaddstr(math.floor(SCREEN_H - 1), math.floor((SCREEN_W-#s)), s)
-            C.doupdate!
+            --C.doupdate!
             c = stdscr\getch!
             switch c
                 when C.KEY_DOWN, C.KEY_SR, ("j")\byte!
