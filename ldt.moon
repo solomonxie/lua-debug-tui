@@ -553,6 +553,7 @@ ldb = {
                 xpcall(ldb.run_debugger, err_hand, err_msg)
                 print(debug.traceback(err_msg, 2))
                 os.exit(2)
+            return condition
 
 }
 return ldb

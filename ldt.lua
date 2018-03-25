@@ -746,8 +746,9 @@ ldb = {
         err_msg = err_msg or 'Assertion failed!'
         xpcall(ldb.run_debugger, err_hand, err_msg)
         print(debug.traceback(err_msg, 2))
-        return os.exit(2)
+        os.exit(2)
       end
+      return condition
     end
   end
 }
