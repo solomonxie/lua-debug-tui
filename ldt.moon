@@ -362,6 +362,7 @@ ldb = {
                 pads.src = Pad "(S)ource Code", pads.err.height,0,pads.stack.height,pads.stack.x,lines, ->color("red")
             pads.src.filename = filename
         
+        local stack_env
         show_vars = (stack_index)->
             if pads.vars
                 pads.vars\erase!
@@ -369,11 +370,13 @@ ldb = {
                 pads.values\erase!
             callstack_min, _ = callstack_range!
             var_names, values = {}, {}
+            stack_env = setmetatable({}, {__index:_G})
             for loc=1,999
                 name, value = debug.getlocal(callstack_min+stack_index-1, loc)
-                if value == nil then break
+                if name == nil then break
                 table.insert(var_names, tostring(name))
                 table.insert(values, value)
+                stack_env[name] = value
                 [[
                 if type(value) == 'function'
                     info = debug.getinfo(value, 'nS')
@@ -415,7 +418,9 @@ ldb = {
                                     value = rawget(value, '__base')
                                     value_str = repr(value, 3)
                                 if #value_str >= value_w-2
-                                    key_repr = (k)-> type(k) == 'string' and k or "[#{repr(k,2)}]"
+                                    key_repr = (k)->
+                                        if type(k) == 'string' and k\match("^[%a_][%w_]*$") then k
+                                        else "[#{repr(k,2)}]"
                                     value_str = table.concat ["#{key_repr k} = #{repr v,2}" for k,v in pairs(value)], "\n \n"
 
                         pads.values = Pad "(D)ata [#{type_str}]",var_y,value_x,pads.vars.height,value_w,
@@ -501,6 +506,51 @@ ldb = {
 
                 when ('d')\byte!
                     select_pad(pads.values) -- (D)ata
+                
+                when (':')\byte!, ('>')\btye!, ('?')\byte!
+                    C.echo(true)
+                    code = ''
+                    if c == ('?')\byte!
+                        stdscr\mvaddstr(SCREEN_H-1, 0, "? "..(' ')\rep(SCREEN_W-1))
+                        stdscr\move(SCREEN_H-1, 2)
+                        code = 'return '..stdscr\getstr!
+                    elseif c == (':')\byte! or c == ('>')\byte!
+                        numlines = 1
+                        stdscr\mvaddstr(SCREEN_H-1, 0, "> "..(' ')\rep(SCREEN_W-1))
+                        stdscr\move(SCREEN_H-1, 2)
+                        while true
+                            line = stdscr\getstr!
+                            if line == '' then break
+                            code ..= line..'\n'
+                            numlines += 1
+                            stdscr\mvaddstr(SCREEN_H-numlines, 0, "> "..((' ')\rep(SCREEN_W)..'\n')\rep(numlines))
+                            stdscr\mvaddstr(SCREEN_H-numlines, 2, code)
+                            stdscr\mvaddstr(SCREEN_H-1, 0, (' ')\rep(SCREEN_W))
+                            stdscr\move(SCREEN_H-1, 0)
+                    C.echo(false)
+                    output = ""
+                    if not stack_env
+                        stack_env = setmetatable({},  {__index:_G})
+                    stack_env.print = (...)->
+                        for i=1,select('#',...)
+                            if i > 1 then output ..= '\t'
+                            output ..= tostring(select(i, ...))
+                        output ..= "\n"
+
+                    for _,p in pairs(pads)
+                        p\refresh(true)
+
+                    run_fn, err_msg = load(code, 'user input', 't', stack_env)
+                    if not run_fn
+                        stdscr\addstr(err_msg)
+                    else
+                        ret = run_fn!
+                        if ret != nil
+                            output ..= '= '..repr(ret)..'\n'
+                        numlines = 0
+                        for nl in output\gmatch('\n') do numlines += 1
+                        stdscr\mvaddstr(SCREEN_H-numlines, 0, output)
+
 
                 when ('o')\byte!
                     file = stack_locations[pads.stack.selected]

@@ -534,6 +534,7 @@ ldb = {
       end
       pads.src.filename = filename
     end
+    local stack_env
     local show_vars
     show_vars = function(stack_index)
       if pads.vars then
@@ -544,13 +545,17 @@ ldb = {
       end
       local callstack_min, _ = callstack_range()
       local var_names, values = { }, { }
+      stack_env = setmetatable({ }, {
+        __index = _G
+      })
       for loc = 1, 999 do
         local name, value = debug.getlocal(callstack_min + stack_index - 1, loc)
-        if value == nil then
+        if name == nil then
           break
         end
         table.insert(var_names, tostring(name))
         table.insert(values, value)
+        stack_env[name] = value
         _ = [[                if type(value) == 'function'
                     info = debug.getinfo(value, 'nS')
                     --values\add_line(("function: %s @ %s:%s")\format(info.name or '???', info.short_src, info.linedefined))
@@ -599,7 +604,11 @@ ldb = {
               if #value_str >= value_w - 2 then
                 local key_repr
                 key_repr = function(k)
-                  return type(k) == 'string' and k or "[" .. tostring(repr(k, 2)) .. "]"
+                  if type(k) == 'string' and k:match("^[%a_][%w_]*$") then
+                    return k
+                  else
+                    return "[" .. tostring(repr(k, 2)) .. "]"
+                  end
                 end
                 value_str = table.concat((function()
                   local _accum_0 = { }
@@ -693,6 +702,64 @@ ldb = {
         select_pad(pads.vars)
       elseif ('d'):byte() == _exp_0 then
         select_pad(pads.values)
+      elseif (':'):byte() == _exp_0 or ('>'):btye() == _exp_0 or ('?'):byte() == _exp_0 then
+        C.echo(true)
+        local code = ''
+        if c == ('?'):byte() then
+          stdscr:mvaddstr(SCREEN_H - 1, 0, "? " .. (' '):rep(SCREEN_W - 1))
+          stdscr:move(SCREEN_H - 1, 2)
+          code = 'return ' .. stdscr:getstr()
+        elseif c == (':'):byte() or c == ('>'):byte() then
+          local numlines = 1
+          stdscr:mvaddstr(SCREEN_H - 1, 0, "> " .. (' '):rep(SCREEN_W - 1))
+          stdscr:move(SCREEN_H - 1, 2)
+          while true do
+            local line = stdscr:getstr()
+            if line == '' then
+              break
+            end
+            code = code .. (line .. '\n')
+            numlines = numlines + 1
+            stdscr:mvaddstr(SCREEN_H - numlines, 0, "> " .. ((' '):rep(SCREEN_W) .. '\n'):rep(numlines))
+            stdscr:mvaddstr(SCREEN_H - numlines, 2, code)
+            stdscr:mvaddstr(SCREEN_H - 1, 0, (' '):rep(SCREEN_W))
+            stdscr:move(SCREEN_H - 1, 0)
+          end
+        end
+        C.echo(false)
+        local output = ""
+        if not stack_env then
+          stack_env = setmetatable({ }, {
+            __index = _G
+          })
+        end
+        stack_env.print = function(...)
+          for i = 1, select('#', ...) do
+            if i > 1 then
+              output = output .. '\t'
+            end
+            output = output .. tostring(select(i, ...))
+          end
+          output = output .. "\n"
+        end
+        for _, p in pairs(pads) do
+          p:refresh(true)
+        end
+        local run_fn
+        run_fn, err_msg = load(code, 'user input', 't', stack_env)
+        if not run_fn then
+          stdscr:addstr(err_msg)
+        else
+          local ret = run_fn()
+          if ret ~= nil then
+            output = output .. ('= ' .. repr(ret) .. '\n')
+          end
+          local numlines = 0
+          for nl in output:gmatch('\n') do
+            numlines = numlines + 1
+          end
+          stdscr:mvaddstr(SCREEN_H - numlines, 0, output)
+        end
       elseif ('o'):byte() == _exp_0 then
         local file = stack_locations[pads.stack.selected]
         local filename, line_no = file:match("([^:]*):(.*)")
