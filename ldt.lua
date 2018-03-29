@@ -214,6 +214,26 @@ do
       self._pad:pnoutrefresh(self.scroll_y - 1, self.scroll_x - 1, self.y + 1, self.x + 1, self.y + h, self.x + w)
       self.dirty = false
     end,
+    keypress = function(self, c)
+      local _exp_0 = c
+      if C.KEY_DOWN == _exp_0 or C.KEY_SR == _exp_0 or ("j"):byte() == _exp_0 then
+        return self:scroll(1, 0)
+      elseif ('J'):byte() == _exp_0 then
+        return self:scroll(10, 0)
+      elseif C.KEY_UP == _exp_0 or C.KEY_SF == _exp_0 or ("k"):byte() == _exp_0 then
+        return self:scroll(-1, 0)
+      elseif ('K'):byte() == _exp_0 then
+        return self:scroll(-10, 0)
+      elseif C.KEY_RIGHT == _exp_0 or ("l"):byte() == _exp_0 then
+        return self:scroll(0, 1)
+      elseif ("L"):byte() == _exp_0 then
+        return self:scroll(0, 10)
+      elseif C.KEY_LEFT == _exp_0 or ("h"):byte() == _exp_0 then
+        return self:scroll(0, -1)
+      elseif ("H"):byte() == _exp_0 then
+        return self:scroll(0, -10)
+      end
+    end,
     erase = function(self)
       self.dirty = true
       self._frame:erase()
@@ -333,6 +353,204 @@ do
     _parent_0.__inherited(_parent_0, _class_0)
   end
   NumberedPad = _class_0
+end
+local DataViewer
+do
+  local _class_0
+  local _parent_0 = Pad
+  local _base_0 = {
+    setup_chstr = function(self, i) end,
+    configure_size = function(self, height, width)
+      self.height, self.width = height, width
+      self._height, self._width = #self.chstrs, self.width - 2
+    end,
+    select = function(self, i)
+      if #self.chstrs == 0 then
+        i = nil
+      end
+      if i == self.selected then
+        return self.selected
+      end
+      local old_y, old_x = self.scroll_y, self.scroll_x
+      if i ~= nil then
+        i = math.max(1, math.min(#self.chstrs, i))
+      end
+      local old_selected
+      old_selected, self.selected = self.selected, i
+      if old_selected then
+        self.chstrs[old_selected]:set_str(0, ' ')
+        self._pad:mvaddchstr(old_selected - 1, 0, self.chstrs[old_selected])
+      end
+      if self.selected then
+        self.chstrs[self.selected]:set_ch(0, C.ACS_RARROW, color('green bold'))
+        self._pad:mvaddchstr(self.selected - 1, 0, self.chstrs[self.selected])
+        local scrolloff = 3
+        if self.selected > self.scroll_y + (self.height - 2) - scrolloff then
+          self.scroll_y = self.selected - (self.height - 2) + scrolloff
+        elseif self.selected < self.scroll_y + scrolloff then
+          self.scroll_y = self.selected - scrolloff
+        end
+        self.scroll_y = math.max(1, math.min(self._height, self.scroll_y))
+      end
+      if self.scroll_y == old_y then
+        local w = math.min(self.width - 2, self._width)
+        if old_selected and self.scroll_y <= old_selected and old_selected <= self.scroll_y + self.height - 2 then
+          self._pad:pnoutrefresh(old_selected - 1, self.scroll_x - 1, self.y + 1 + (old_selected - self.scroll_y), self.x + 1, self.y + 1 + (old_selected - self.scroll_y) + 1, self.x + w)
+        end
+        if self.selected and self.scroll_y <= self.selected and self.selected <= self.scroll_y + self.height - 2 then
+          self._pad:pnoutrefresh(self.selected - 1, self.scroll_x - 1, self.y + 1 + (self.selected - self.scroll_y), self.x + 1, self.y + 1 + (self.selected - self.scroll_y) + 1, self.x + w)
+        end
+      else
+        self.dirty = true
+      end
+      if self.on_select then
+        self:on_select(self.selected)
+      end
+      return self.selected
+    end,
+    keypress = function(self, c)
+      local _exp_0 = c
+      if C.KEY_DOWN == _exp_0 or C.KEY_SR == _exp_0 or ("j"):byte() == _exp_0 then
+        return self:scroll(1, 0)
+      elseif ('J'):byte() == _exp_0 then
+        return self:scroll(10, 0)
+      elseif C.KEY_UP == _exp_0 or C.KEY_SF == _exp_0 or ("k"):byte() == _exp_0 then
+        return self:scroll(-1, 0)
+      elseif ('K'):byte() == _exp_0 then
+        return self:scroll(-10, 0)
+      elseif C.KEY_RIGHT == _exp_0 or ("l"):byte() == _exp_0 then
+        self.chstr_actions[self.selected]()
+        return self:full_refresh()
+      elseif ("L"):byte() == _exp_0 then
+        self.chstr_actions[self.selected]()
+        return self:full_refresh()
+      elseif C.KEY_LEFT == _exp_0 or ("h"):byte() == _exp_0 then
+        self.chstr_actions[self.selected]()
+        return self:full_refresh()
+      elseif ("H"):byte() == _exp_0 then
+        self.chstr_actions[self.selected]()
+        return self:full_refresh()
+      end
+    end
+  }
+  _base_0.__index = _base_0
+  setmetatable(_base_0, _parent_0.__base)
+  _class_0 = setmetatable({
+    __init = function(self, data, label, y, x, height, width)
+      self.data, self.label, self.y, self.x = data, label, y, x
+      self.scroll_y, self.scroll_x = 1, 1
+      self.selected = nil
+      self.active_frame = color("yellow bold")
+      self.inactive_frame = color("blue dim")
+      self.expansions = { }
+      self.full_refresh = function()
+        self.chstrs, self.chstr_actions = { }, { }
+        local line_matcher = re.compile('lines<-{|(line "\n")* line|} line<-{[^\n]*}')
+        local W = width - 3
+        local add_line
+        add_line = function(text, attr, indent, action)
+          local requested = line_matcher:match(text)
+          for _index_0 = 1, #requested do
+            local line = requested[_index_0]
+            local wrapped = wrap_text(line, W - 2 * indent)
+            for i, subline in ipairs(wrapped) do
+              local chstr = C.new_chstr(W + 1)
+              chstr:set_str(0, ' ', color())
+              if i == 1 then
+                chstr:set_ch(1, C.ACS_CKBOARD, color('black bold'), 2 * indent)
+              elseif indent > 0 then
+                chstr:set_ch(1, C.ACS_CKBOARD, color('black bold'), 2 * indent - 1)
+                chstr:set_ch(1 + 2 * indent - 1, C.ACS_BULLET, color('black bold'))
+              end
+              chstr:set_str(1 + 2 * indent, subline, attr)
+              chstr:set_str(1 + 2 * indent + #subline, ' ', attr, W - (2 * indent + #subline))
+              table.insert(self.chstrs, chstr)
+              table.insert(self.chstr_actions, action)
+            end
+          end
+        end
+        local add
+        add = function(data, expansions, indent)
+          if type(data) == 'table' then
+            for k, v in pairs(data) do
+              if expansions[k] then
+                add_line("(-)", color('yellow bold'), indent, (function()
+                  expansions[k] = nil
+                end))
+                add(k, expansions[k], indent + 1)
+                add(v, expansions[k], indent + 1)
+              else
+                add_line("[" .. tostring(repr(k, 1)) .. "] = " .. tostring(repr(v, 1)), color('yellow bold'), indent, (function()
+                  expansions[k] = { }
+                end))
+              end
+            end
+            return 
+          end
+          local _color
+          local _exp_0 = type(data)
+          if 'string' == _exp_0 then
+            _color = color('default')
+          elseif 'number' == _exp_0 then
+            data = tostring(data)
+            _color = color('magenta')
+          elseif 'boolean' == _exp_0 then
+            data = tostring(data)
+            _color = data and color('green') or color('red')
+          elseif 'nil' == _exp_0 then
+            data = tostring(data)
+            _color = color('cyan')
+          elseif 'function' == _exp_0 or 'userdata' == _exp_0 or 'thread' == _exp_0 then
+            data = repr(data)
+            _color = color('blue bold')
+          else
+            _color = error("Unsupported type: " .. tostring(type(data)))
+          end
+          return add_line(data, _color, indent, (function() end))
+        end
+        add(self.data, self.expansions, 0)
+        self._height, self._width = #self.chstrs, self.width - 2
+        self._pad:resize(self._height, self._width)
+        for i, chstr in ipairs(self.chstrs) do
+          self._pad:mvaddchstr(i - 1, 0, chstr)
+        end
+        self.dirty = true
+      end
+      self.height, self.width = height, width
+      self._frame = C.newwin(self.height, self.width, self.y, self.x)
+      self._frame:immedok(true)
+      self._pad = C.newpad(self.height - 2, self.width - 2)
+      self._pad:scrollok(true)
+      self:set_active(false)
+      self:full_refresh()
+      return self:select(1)
+    end,
+    __base = _base_0,
+    __name = "DataViewer",
+    __parent = _parent_0
+  }, {
+    __index = function(cls, name)
+      local val = rawget(_base_0, name)
+      if val == nil then
+        local parent = rawget(cls, "__parent")
+        if parent then
+          return parent[name]
+        end
+      else
+        return val
+      end
+    end,
+    __call = function(cls, ...)
+      local _self_0 = setmetatable({}, _base_0)
+      cls.__init(_self_0, ...)
+      return _self_0
+    end
+  })
+  _base_0.__class = _class_0
+  if _parent_0.__inherited then
+    _parent_0.__inherited(_parent_0, _class_0)
+  end
+  DataViewer = _class_0
 end
 local ok, to_lua = pcall(function()
   return require('moonscript.base').to_lua
@@ -578,72 +796,49 @@ ldb = {
         local value_w = SCREEN_W - (value_x)
         local value = values[var_index]
         local type_str = type(value)
-        local _exp_0 = type_str
-        if "string" == _exp_0 then
-          pads.values = Pad("(D)ata [string]", var_y, value_x, pads.vars.height, value_w, wrap_text(value, value_w - 2), function(self, i)
-            return color()
-          end)
-        elseif "table" == _exp_0 then
-          local value_str = repr(value, 3)
-          local mt = getmetatable(value)
-          if mt then
-            if rawget(mt, '__class') and rawget(rawget(mt, '__class'), '__name') then
-              type_str = rawget(rawget(mt, '__class'), '__name')
-            elseif rawget(value, '__base') and rawget(value, '__name') then
-              type_str = "class " .. tostring(rawget(value, '__name'))
-            else
-              type_str = 'table with metatable'
-            end
-            if rawget(mt, '__tostring') then
-              value_str = tostring(value)
-            else
-              if rawget(value, '__base') and rawget(value, '__name') then
-                value = rawget(value, '__base')
-                value_str = repr(value, 3)
-              end
-              if #value_str >= value_w - 2 then
-                local key_repr
-                key_repr = function(k)
-                  if type(k) == 'string' and k:match("^[%a_][%w_]*$") then
-                    return k
-                  else
-                    return "[" .. tostring(repr(k, 2)) .. "]"
-                  end
-                end
-                value_str = table.concat((function()
-                  local _accum_0 = { }
-                  local _len_0 = 1
-                  for k, v in pairs(value) do
-                    _accum_0[_len_0] = tostring(key_repr(k)) .. " = " .. tostring(repr(v, 2))
-                    _len_0 = _len_0 + 1
-                  end
-                  return _accum_0
-                end)(), "\n \n")
-              end
-            end
-          end
-          pads.values = Pad("(D)ata [" .. tostring(type_str) .. "]", var_y, value_x, pads.vars.height, value_w, wrap_text(value_str, value_w - 2), function(self, i)
-            return color("cyan bold")
-          end)
-        elseif "function" == _exp_0 then
-          local info = debug.getinfo(value, 'nS')
-          local s = ("function '%s' defined at %s:%s"):format(info.name or var_names[var_index], info.short_src, info.linedefined)
-          pads.values = Pad("(D)ata [" .. tostring(type_str) .. "]", var_y, value_x, pads.vars.height, value_w, wrap_text(s, value_w - 2), function(self, i)
-            return color("green bold")
-          end)
-        elseif "number" == _exp_0 then
-          pads.values = Pad("(D)ata [" .. tostring(type_str) .. "]", var_y, value_x, pads.vars.height, value_w, wrap_text(repr(value), value_w - 2), function(self, i)
-            return color("magenta bold")
-          end)
-        elseif "boolean" == _exp_0 then
-          pads.values = Pad("(D)ata [" .. tostring(type_str) .. "]", var_y, value_x, pads.vars.height, value_w, wrap_text(repr(value), value_w - 2), function(self, i)
-            return value and color("green bold") or color("red bold")
-          end)
-        else
-          pads.values = Pad("(D)ata [" .. tostring(type_str) .. "]", var_y, value_x, pads.vars.height, value_w, wrap_text(repr(value), value_w - 2), function(self, i)
-            return color()
-          end)
-        end
+        pads.values = DataViewer(value, "(D)ata [" .. tostring(type_str) .. "]", var_y, value_x, pads.vars.height, value_w)
+        _ = [[                switch type_str
+                    when "string"
+                        pads.values = Pad "(D)ata [string]",var_y,value_x,pads.vars.height,value_w,
+                            wrap_text(value, value_w-2), (i)=>color()
+                    when "table"
+                        value_str = repr(value, 3)
+                        mt = getmetatable(value)
+                        if mt
+                            type_str = if rawget(mt, '__class') and rawget(rawget(mt, '__class'), '__name')
+                                rawget(rawget(mt, '__class'), '__name')
+                            elseif rawget(value, '__base') and rawget(value, '__name') then "class #{rawget(value,'__name')}"
+                            else 'table with metatable'
+                            if rawget(mt, '__tostring')
+                                value_str = tostring(value)
+                            else
+                                if rawget(value, '__base') and rawget(value, '__name')
+                                    value = rawget(value, '__base')
+                                    value_str = repr(value, 3)
+                                if #value_str >= value_w-2
+                                    key_repr = (k)->
+                                        if type(k) == 'string' and k\match("^[%a_][%w_]*$") then k
+                                        else "[#{repr(k,2)}]"
+                                    value_str = table.concat ["#{key_repr k} = #{repr v,2}" for k,v in pairs(value)], "\n \n"
+
+                        pads.values = Pad "(D)ata [#{type_str}]",var_y,value_x,pads.vars.height,value_w,
+                            wrap_text(value_str, value_w-2), (i)=>color("cyan bold")
+                    when "function"
+                        info = debug.getinfo(value, 'nS')
+                        s = ("function '%s' defined at %s:%s")\format info.name or var_names[var_index],
+                            info.short_src, info.linedefined
+                        pads.values = Pad "(D)ata [#{type_str}]",var_y,value_x,pads.vars.height,value_w,
+                            wrap_text(s, value_w-2), (i)=>color("green bold")
+                    when "number"
+                        pads.values = Pad "(D)ata [#{type_str}]",var_y,value_x,pads.vars.height,value_w,
+                            wrap_text(repr(value), value_w-2), (i)=>color("magenta bold")
+                    when "boolean"
+                        pads.values = Pad "(D)ata [#{type_str}]",var_y,value_x,pads.vars.height,value_w,
+                            wrap_text(repr(value), value_w-2), (i)=> value and color("green bold") or color("red bold")
+                    else
+                        pads.values = Pad "(D)ata [#{type_str}]",var_y,value_x,pads.vars.height,value_w,
+                            wrap_text(repr(value), value_w-2), (i)=>color()
+                ]]
         collectgarbage()
         return collectgarbage()
       end
@@ -678,31 +873,7 @@ ldb = {
       stdscr:mvaddstr(math.floor(SCREEN_H - 1), math.floor((SCREEN_W - #s)), s)
       local c = stdscr:getch()
       local _exp_0 = c
-      if C.KEY_DOWN == _exp_0 or C.KEY_SR == _exp_0 or ("j"):byte() == _exp_0 then
-        selected_pad:scroll(1, 0)
-      elseif ('J'):byte() == _exp_0 then
-        selected_pad:scroll(10, 0)
-      elseif C.KEY_UP == _exp_0 or C.KEY_SF == _exp_0 or ("k"):byte() == _exp_0 then
-        selected_pad:scroll(-1, 0)
-      elseif ('K'):byte() == _exp_0 then
-        selected_pad:scroll(-10, 0)
-      elseif C.KEY_RIGHT == _exp_0 or ("l"):byte() == _exp_0 then
-        selected_pad:scroll(0, 1)
-      elseif ("L"):byte() == _exp_0 then
-        selected_pad:scroll(0, 10)
-      elseif C.KEY_LEFT == _exp_0 or ("h"):byte() == _exp_0 then
-        selected_pad:scroll(0, -1)
-      elseif ("H"):byte() == _exp_0 then
-        selected_pad:scroll(0, -10)
-      elseif ('c'):byte() == _exp_0 then
-        select_pad(pads.stack)
-      elseif ('s'):byte() == _exp_0 then
-        select_pad(pads.src)
-      elseif ('v'):byte() == _exp_0 then
-        select_pad(pads.vars)
-      elseif ('d'):byte() == _exp_0 then
-        select_pad(pads.values)
-      elseif (':'):byte() == _exp_0 or ('>'):byte() == _exp_0 or ('?'):byte() == _exp_0 then
+      if (':'):byte() == _exp_0 or ('>'):byte() == _exp_0 or ('?'):byte() == _exp_0 then
         C.echo(true)
         local code = ''
         if c == ('?'):byte() then
@@ -790,6 +961,16 @@ ldb = {
         pads = { }
         C.endwin()
         return 
+      elseif ('c'):byte() == _exp_0 then
+        select_pad(pads.stack)
+      elseif ('s'):byte() == _exp_0 then
+        select_pad(pads.src)
+      elseif ('v'):byte() == _exp_0 then
+        select_pad(pads.vars)
+      elseif ('d'):byte() == _exp_0 then
+        select_pad(pads.values)
+      else
+        selected_pad:keypress(c)
       end
     end
     return C.endwin()

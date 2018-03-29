@@ -195,6 +195,28 @@ class Pad
         h,w = math.min(@height-2,@_height),math.min(@width-2,@_width)
         @_pad\pnoutrefresh(@scroll_y-1,@scroll_x-1,@y+1,@x+1,@y+h,@x+w)
         @dirty = false
+
+    keypress: (c)=>
+        switch c
+            when C.KEY_DOWN, C.KEY_SR, ("j")\byte!
+                @scroll(1,0)
+            when ('J')\byte!
+                @scroll(10,0)
+
+            when C.KEY_UP, C.KEY_SF, ("k")\byte!
+                @scroll(-1,0)
+            when ('K')\byte!
+                @scroll(-10,0)
+
+            when C.KEY_RIGHT, ("l")\byte!
+                @scroll(0,1)
+            when ("L")\byte!
+                @scroll(0,10)
+
+            when C.KEY_LEFT, ("h")\byte!
+                @scroll(0,-1)
+            when ("H")\byte!
+                @scroll(0,-10)
     
     erase: =>
         @dirty = true
@@ -212,6 +234,150 @@ class NumberedPad extends Pad
         line_nums = [fmt\format(i) for i=1,#col1]
         cols = {line_nums, ((i)=> i == @selected and color() or color("yellow")), ...}
         super @label, @y, @x, height, width, unpack(cols)
+
+class DataViewer extends Pad
+    new: (@data,@label,@y,@x,height,width)=>
+        @scroll_y, @scroll_x = 1, 1
+        @selected = nil
+
+        @active_frame = color("yellow bold")
+        @inactive_frame = color("blue dim")
+
+        @expansions = {}
+        @full_refresh = ->
+            @chstrs, @chstr_actions = {}, {}
+            line_matcher = re.compile('lines<-{|(line "\n")* line|} line<-{[^\n]*}')
+            W = width-3
+            add_line = (text, attr, indent, action)->
+                requested = line_matcher\match(text)
+                for line in *requested
+                    wrapped = wrap_text(line, W-2*indent)
+                    for i,subline in ipairs(wrapped)
+                        chstr = C.new_chstr(W+1)
+                        chstr\set_str(0, ' ', color!)
+                        if i == 1
+                            chstr\set_ch(1, C.ACS_CKBOARD, color('black bold'), 2*indent)
+                        elseif indent > 0
+                            chstr\set_ch(1, C.ACS_CKBOARD, color('black bold'), 2*indent-1)
+                            chstr\set_ch(1+2*indent-1, C.ACS_BULLET, color('black bold'))
+                        chstr\set_str(1+2*indent, subline, attr)
+                        chstr\set_str(1+2*indent+#subline, ' ', attr, W-(2*indent+#subline))
+                        table.insert @chstrs, chstr
+                        table.insert @chstr_actions, action
+
+            add = (data, expansions, indent)->
+                if type(data) == 'table'
+                    for k,v in pairs(data)
+                        if expansions[k]
+                            add_line "(-)", color('yellow bold'), indent, (->expansions[k] = nil)
+                            add(k, expansions[k], indent+1)
+                            add(v, expansions[k], indent+1)
+                        else
+                            add_line "[#{repr k, 1}] = #{repr v, 1}", color('yellow bold'), indent, (->expansions[k] = {})
+                    return
+
+                _color = switch type(data)
+                    when 'string'
+                        color('default')
+                    when 'number'
+                        data = tostring(data)
+                        color('magenta')
+                    when 'boolean'
+                        data = tostring(data)
+                        data and color('green') or color('red')
+                    when 'nil'
+                        data = tostring(data)
+                        color('cyan')
+                    when 'function', 'userdata', 'thread'
+                        data = repr(data)
+                        -- TODO: better visualization/expansion here
+                        color('blue bold')
+                    else
+                        error("Unsupported type: #{type data}")
+                add_line data, _color, indent, (->)
+            add(@data, @expansions, 0)
+            @_height, @_width = #@chstrs, @width-2
+            @_pad\resize(@_height, @_width)
+            for i,chstr in ipairs(@chstrs)
+                @_pad\mvaddchstr(i-1,0,chstr)
+            @dirty = true
+
+        @height, @width = height, width
+        @_frame = C.newwin(@height, @width, @y, @x)
+        @_frame\immedok(true)
+        @_pad = C.newpad(@height-2, @width-2)
+        @_pad\scrollok(true)
+        @set_active false
+        
+        @full_refresh!
+        @select 1
+
+    setup_chstr:(i)=>
+
+    configure_size: (@height, @width)=>
+        @_height, @_width = #@chstrs, @width-2
+
+    select:(i)=>
+        if #@chstrs == 0 then i = nil
+        if i == @selected then return @selected
+        old_y, old_x = @scroll_y, @scroll_x
+        if i != nil
+            i = math.max(1, math.min(#@chstrs, i))
+        
+        old_selected,@selected = @selected,i
+
+        if old_selected
+            @chstrs[old_selected]\set_str(0, ' ')
+            @_pad\mvaddchstr(old_selected-1,0,@chstrs[old_selected])
+
+        if @selected
+            @chstrs[@selected]\set_ch(0, C.ACS_RARROW, color('green bold'))
+            @_pad\mvaddchstr(@selected-1,0,@chstrs[@selected])
+
+            scrolloff = 3
+            if @selected > @scroll_y + (@height-2) - scrolloff
+                @scroll_y = @selected - (@height-2) + scrolloff
+            elseif @selected < @scroll_y + scrolloff
+                @scroll_y = @selected - scrolloff
+            @scroll_y = math.max(1, math.min(@_height, @scroll_y))
+
+        if @scroll_y == old_y
+            w = math.min(@width-2,@_width)
+            if old_selected and @scroll_y <= old_selected and old_selected <= @scroll_y + @height-2
+                @_pad\pnoutrefresh(old_selected-1,@scroll_x-1,@y+1+(old_selected-@scroll_y),@x+1,@y+1+(old_selected-@scroll_y)+1,@x+w)
+            if @selected and @scroll_y <= @selected and @selected <= @scroll_y + @height-2
+                @_pad\pnoutrefresh(@selected-1,@scroll_x-1,@y+1+(@selected-@scroll_y),@x+1,@y+1+(@selected-@scroll_y)+1,@x+w)
+        else
+            @dirty = true
+
+        if @on_select then @on_select(@selected)
+        return @selected
+
+    keypress: (c)=>
+        switch c
+            when C.KEY_DOWN, C.KEY_SR, ("j")\byte!
+                @scroll(1,0)
+            when ('J')\byte!
+                @scroll(10,0)
+
+            when C.KEY_UP, C.KEY_SF, ("k")\byte!
+                @scroll(-1,0)
+            when ('K')\byte!
+                @scroll(-10,0)
+
+            when C.KEY_RIGHT, ("l")\byte!
+                @chstr_actions[@selected]!
+                @full_refresh!
+            when ("L")\byte!
+                @chstr_actions[@selected]!
+                @full_refresh!
+
+            when C.KEY_LEFT, ("h")\byte!
+                @chstr_actions[@selected]!
+                @full_refresh!
+            when ("H")\byte!
+                @chstr_actions[@selected]!
+                @full_refresh!
 
 ok, to_lua = pcall -> require('moonscript.base').to_lua
 if not ok then to_lua = -> nil
@@ -399,6 +565,8 @@ ldb = {
                 value = values[var_index]
                 type_str = type(value)
                 -- Show single value:
+                pads.values = DataViewer value, "(D)ata [#{type_str}]", var_y,value_x,pads.vars.height,value_w
+                [[
                 switch type_str
                     when "string"
                         pads.values = Pad "(D)ata [string]",var_y,value_x,pads.vars.height,value_w,
@@ -440,7 +608,7 @@ ldb = {
                     else
                         pads.values = Pad "(D)ata [#{type_str}]",var_y,value_x,pads.vars.height,value_w,
                             wrap_text(repr(value), value_w-2), (i)=>color()
-
+                ]]
                 collectgarbage()
                 collectgarbage()
 
@@ -475,38 +643,6 @@ ldb = {
             --C.doupdate!
             c = stdscr\getch!
             switch c
-                when C.KEY_DOWN, C.KEY_SR, ("j")\byte!
-                    selected_pad\scroll(1,0)
-                when ('J')\byte!
-                    selected_pad\scroll(10,0)
-
-                when C.KEY_UP, C.KEY_SF, ("k")\byte!
-                    selected_pad\scroll(-1,0)
-                when ('K')\byte!
-                    selected_pad\scroll(-10,0)
-
-                when C.KEY_RIGHT, ("l")\byte!
-                    selected_pad\scroll(0,1)
-                when ("L")\byte!
-                    selected_pad\scroll(0,10)
-
-                when C.KEY_LEFT, ("h")\byte!
-                    selected_pad\scroll(0,-1)
-                when ("H")\byte!
-                    selected_pad\scroll(0,-10)
-
-                when ('c')\byte!
-                    select_pad(pads.stack) -- (C)allstack
-
-                when ('s')\byte!
-                    select_pad(pads.src) -- (S)ource Code
-
-                when ('v')\byte!
-                    select_pad(pads.vars) -- (V)ars
-
-                when ('d')\byte!
-                    select_pad(pads.values) -- (D)ata
-                
                 when (':')\byte!, ('>')\byte!, ('?')\byte!
                     C.echo(true)
                     code = ''
@@ -581,6 +717,21 @@ ldb = {
                     pads = {}
                     C.endwin!
                     return
+
+                when ('c')\byte!
+                    select_pad(pads.stack) -- (C)allstack
+
+                when ('s')\byte!
+                    select_pad(pads.src) -- (S)ource Code
+
+                when ('v')\byte!
+                    select_pad(pads.vars) -- (V)ars
+
+                when ('d')\byte!
+                    select_pad(pads.values) -- (D)ata
+                
+                else
+                    selected_pad\keypress(c)
 
         C.endwin!
 
