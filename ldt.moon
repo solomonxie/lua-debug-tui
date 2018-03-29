@@ -507,7 +507,7 @@ ldb = {
                 when ('d')\byte!
                     select_pad(pads.values) -- (D)ata
                 
-                when (':')\byte!, ('>')\btye!, ('?')\byte!
+                when (':')\byte!, ('>')\byte!, ('?')\byte!
                     C.echo(true)
                     code = ''
                     if c == ('?')\byte!

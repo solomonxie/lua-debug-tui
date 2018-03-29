@@ -702,7 +702,7 @@ ldb = {
         select_pad(pads.vars)
       elseif ('d'):byte() == _exp_0 then
         select_pad(pads.values)
-      elseif (':'):byte() == _exp_0 or ('>'):btye() == _exp_0 or ('?'):byte() == _exp_0 then
+      elseif (':'):byte() == _exp_0 or ('>'):byte() == _exp_0 or ('?'):byte() == _exp_0 then
         C.echo(true)
         local code = ''
         if c == ('?'):byte() then
