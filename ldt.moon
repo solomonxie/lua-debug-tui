@@ -3,6 +3,7 @@ re = require 're'
 repr = require 'repr'
 local ldb
 AUTO = {} -- Singleton
+PARENT = {} -- Singleton
 
 _error = error
 _assert = assert
@@ -37,7 +38,7 @@ wrap_text = (text, width)->
     return lines
 
 
-local color
+local Color
 do
     color_index = 0
     existing = {}
@@ -55,11 +56,11 @@ do
                 ({:bg: "on " {color} :} / ({:fg: color :} (" on " {:bg: color :})?))
                 {:attrs: {| (" " {attr})* |} :})
         |}
-        attr <- "blink" / "bold" / "dim" / "invis" / "normal" / "protect" / "reverse" / "standout" / "underline"
+        attr <- "blink" / "bold" / "dim" / "invis" / "normal" / "protect" / "reverse" / "standout" / "underline" / "altcharset"
         color <- "black" / "blue" / "cyan" / "green" / "magenta" / "red" / "white" / "yellow" / "default"
     ]]
     C.COLOR_DEFAULT = -1
-    color = (s="default")->
+    Color = (s="default")->
         t = _assert(color_lang\match(s), "Invalid color: #{s}")
         if t.fg then t.fg = C["COLOR_"..t.fg\upper!]
         if t.bg then t.bg = C["COLOR_"..t.bg\upper!]
@@ -76,8 +77,8 @@ class Pad
 
         @columns = {}
         @column_widths = {}
-        @active_frame = color("yellow bold")
-        @inactive_frame = color("blue dim")
+        @active_frame = Color("yellow bold")
+        @inactive_frame = Color("blue dim")
         @colors = {}
         for i=1,select('#',...)-1,2
             col = select(i, ...)
@@ -85,7 +86,7 @@ class Pad
             w = 0
             for chunk in *col do w = math.max(w, #chunk)
             table.insert(@column_widths, w)
-            color_fn = select(i+1,...) or ((i)=>color())
+            color_fn = select(i+1,...) or ((i)=>Color())
             _assert(type(color_fn) == 'function', "Invalid color function type: #{type color_fn}")
             table.insert(@colors, color_fn)
 
@@ -127,7 +128,7 @@ class Pad
                 chstr\set_str(x, " ", attr, @column_widths[c]-#chunk)
                 x += @column_widths[c]-#chunk
             if c < #@columns
-                chstr\set_ch(x, C.ACS_VLINE, color("black bold"))
+                chstr\set_ch(x, C.ACS_VLINE, Color("black bold"))
                 x += 1
         @_pad\mvaddchstr(i-1,0,chstr)
         @dirty = true
@@ -232,75 +233,161 @@ class NumberedPad extends Pad
         col1 = select(1, ...)
         fmt = "%#{#tostring(#col1)}d"
         line_nums = [fmt\format(i) for i=1,#col1]
-        cols = {line_nums, ((i)=> i == @selected and color() or color("yellow")), ...}
+        cols = {line_nums, ((i)=> i == @selected and Color() or Color("yellow")), ...}
         super @label, @y, @x, height, width, unpack(cols)
+
+
+line_matcher = re.compile('lines<-{|(line "\n")* line|} line<-{[^\n]*}')
+expansions = {}
+KEY = {}
+VALUE = {}
+TOP_LOCATION = {}
+locations = {}
+Location = (old_loc, kind, key)->
+    unless locations[old_loc]
+        locations[old_loc] = {}
+    unless locations[old_loc][kind]
+        locations[old_loc][kind] = {}
+    unless locations[old_loc][kind][key]
+        locations[old_loc][kind][key] = {}
+    return locations[old_loc][kind][key]
+
+expand = (kind, key, location)->
+    expansions[Location(location, kind, key)] = true
+collapse = (kind, key, location)->
+    expansions[Location(location, kind, key)] = nil
+is_key_expanded = (location, key)->
+    expansions[Location(location, KEY, key)]
+is_value_expanded = (location, key)->
+    expansions[Location(location, VALUE, key)]
+
+make_lines = (location, x, width)->
+    -- Return a list of {location=location, text1, color1, text2, color2, ...}
+    type_colors = {string:Color('blue on black'), number:Color('magenta'), boolean:Color('yellow'),
+        nil:Color('cyan'), table:Color('white bold'), function:Color('green'),
+        userdata:Color('cyan bold'), thread:Color('blue')}
+    setmetatable(type_colors, {__index: -> Color('red bold')})
+    switch type(x)
+        when 'string'
+            lines = {}
+            for line in *line_matcher\match(x)
+                wrapped = wrap_text(line, width-1)
+                for i,subline in ipairs(wrapped)
+                    _line = {location:location}
+                    if i > 1
+                        table.insert(_line, C.ACS_BULLET)
+                        table.insert(_line, Color('black bold altcharset'))
+                    table.insert(_line, subline)
+                    table.insert(_line, Color('blue on black bold'))
+                    table.insert(lines, _line)
+            return lines
+        when 'table'
+            prepend = (line, ...)->
+                for i=1,select('#', ...)
+                    table.insert(line, i, (select(i, ...)))
+            lines = {}
+            for k,v in pairs(x)
+                if is_key_expanded(location, k) and is_value_expanded(location, k)
+                    table.insert lines, {location:Location(location,KEY,k), 'key/value:', Color('white')}
+                    key_lines = make_lines(Location(location, KEY, k), k, width-2)
+                    for i,key_line in ipairs(key_lines)
+                        for j=2,#key_line,2
+                            key_line[j] = key_line[j] | C.A_REVERSE
+                        if i == 1
+                            prepend(key_line, C.ACS_LLCORNER, Color!, C.ACS_TTEE, Color!)
+                        else
+                            prepend(key_line, ' ', Color!, C.ACS_VLINE, Color!)
+                        table.insert(lines, key_line)
+                    value_lines = make_lines(Location(location, VALUE, k), v, width-2)
+                    for i,value_line in ipairs(value_lines)
+                        if i == 1
+                            prepend(value_line, ' ', Color!, C.ACS_LLCORNER, Color!)
+                        else
+                            prepend(value_line, '  ', Color!)
+                        table.insert(lines, value_line)
+                elseif is_value_expanded(location, k)
+                    k_str = type(k) == 'string' and k\gsub('\n','\\n') or repr(k,2)
+                    if #k_str > width then k_str = k_str\sub(1,width-3)..'...'
+                    table.insert(lines, {location:Location(location, KEY, k), k_str, type_colors[type(k)] | C.A_REVERSE})
+
+                    v_lines = make_lines(Location(location, VALUE, k), v, width-1)
+                    prepend(v_lines[1], C.ACS_LLCORNER, Color!)
+                    for i=2,#v_lines
+                        prepend(v_lines[i], ' ', Color!)
+                    for v_line in *v_lines do table.insert(lines, v_line)
+                elseif is_key_expanded(location, k)
+                    k_lines = make_lines(Location(location, KEY, k), k, width-1)
+                    for k_line in *k_lines
+                        for i=2,#k_line,2 do k_line[i] = k_lin[i] | C.A_REVERSE
+                    for i=1,#k_lines-1
+                        prepend(k_lines[i], ' ', Color!)
+                    prepend(k_lines[#k_lines-1], C.ACS_ULCORNER, Color!)
+                    for k_line in *k_lines do table.insert(lines, k_line)
+
+                    v_str = type(v) == 'string' and v\gsub('\n','\\n') or repr(v,2)
+                    if #v_str > width then v_str = v_str\sub(1,width-3)..'...'
+                    table.insert(lines, {location:Location(location, VALUE, k), v_str, type_colors[type(v)]})
+                else
+                    k_space = math.floor((width-3)/3)
+                    k_str = type(k) == 'string' and k\gsub('\n','\\n') or repr(k,2)
+                    if #k_str > k_space then k_str = k_str\sub(1,k_space-3)..'...'
+                    v_space = (width-3)-#k_str
+                    v_str = type(v) == 'string' and v\gsub('\n','\\n') or repr(v,2)
+                    if #v_str > v_space then v_str = v_str\sub(1,v_space-3)..'...'
+                    table.insert(lines, {
+                        location:Location(location, VALUE, k),
+                        k_str, type_colors[type(k)] | C.A_REVERSE,
+                        ' = ', Color!,
+                        v_str, type_colors[type(v)]})
+            return lines
+        else
+            str = repr(x,2)
+            if #str > width
+                str = str\sub(1,width-3)..'...'
+            return {{:location, str, type_colors[type(x)]}}
+
 
 class DataViewer extends Pad
     new: (@data,@label,@y,@x,height,width)=>
         @scroll_y, @scroll_x = 1, 1
         @selected = nil
 
-        @active_frame = color("yellow bold")
-        @inactive_frame = color("blue dim")
+        @active_frame = Color("yellow bold")
+        @inactive_frame = Color("blue dim")
 
         @expansions = {}
         @full_refresh = ->
-            @chstrs, @chstr_actions = {}, {}
+            old_location = @selected and @chstr_locations and @chstr_locations[@selected]
+            @chstrs, @chstr_locations = {}, {}
             line_matcher = re.compile('lines<-{|(line "\n")* line|} line<-{[^\n]*}')
             W = width-3
-            add_line = (text, attr, indent, action)->
-                requested = line_matcher\match(text)
-                for line in *requested
-                    wrapped = wrap_text(line, W-2*indent)
-                    for i,subline in ipairs(wrapped)
-                        chstr = C.new_chstr(W+1)
-                        chstr\set_str(0, ' ', color!)
-                        if i == 1
-                            chstr\set_ch(1, C.ACS_CKBOARD, color('black bold'), 2*indent)
-                        elseif indent > 0
-                            chstr\set_ch(1, C.ACS_CKBOARD, color('black bold'), 2*indent-1)
-                            chstr\set_ch(1+2*indent-1, C.ACS_BULLET, color('black bold'))
-                        chstr\set_str(1+2*indent, subline, attr)
-                        chstr\set_str(1+2*indent+#subline, ' ', attr, W-(2*indent+#subline))
-                        table.insert @chstrs, chstr
-                        table.insert @chstr_actions, action
-
-            add = (data, expansions, indent)->
-                if type(data) == 'table'
-                    for k,v in pairs(data)
-                        if expansions[k]
-                            add_line "(-)", color('yellow bold'), indent, (->expansions[k] = nil)
-                            add(k, expansions[k], indent+1)
-                            add(v, expansions[k], indent+1)
-                        else
-                            add_line "[#{repr k, 1}] = #{repr v, 1}", color('yellow bold'), indent, (->expansions[k] = {})
-                    return
-
-                _color = switch type(data)
-                    when 'string'
-                        color('default')
-                    when 'number'
-                        data = tostring(data)
-                        color('magenta')
-                    when 'boolean'
-                        data = tostring(data)
-                        data and color('green') or color('red')
-                    when 'nil'
-                        data = tostring(data)
-                        color('cyan')
-                    when 'function', 'userdata', 'thread'
-                        data = repr(data)
-                        -- TODO: better visualization/expansion here
-                        color('blue bold')
+            lines = make_lines(TOP_LOCATION, @data, W)
+            for i,line in ipairs(lines)
+                chstr = C.new_chstr(W)
+                offset = 1
+                for j=1,#line-1,2
+                    chunk, attrs = line[j], line[j+1]
+                    if type(chunk) == 'number'
+                        chstr\set_ch(offset, chunk, attrs)
+                        offset += 1
                     else
-                        error("Unsupported type: #{type data}")
-                add_line data, _color, indent, (->)
-            add(@data, @expansions, 0)
+                        chstr\set_str(offset, chunk, attrs)
+                        offset += #chunk
+                if offset < W
+                    chstr\set_str(offset, ' ', attrs, W-offset)
+                table.insert @chstrs, chstr
+                table.insert @chstr_locations, line.location
+
             @_height, @_width = #@chstrs, @width-2
             @_pad\resize(@_height, @_width)
             for i,chstr in ipairs(@chstrs)
                 @_pad\mvaddchstr(i-1,0,chstr)
             @dirty = true
+            if old_location
+                for i,loc in ipairs(@chstr_locations)
+                    if loc == old_location
+                        @select(i)
+                        break
 
         @height, @width = height, width
         @_frame = C.newwin(@height, @width, @y, @x)
@@ -326,12 +413,12 @@ class DataViewer extends Pad
         
         old_selected,@selected = @selected,i
 
-        if old_selected
+        if old_selected and @chstrs[old_selected]
             @chstrs[old_selected]\set_str(0, ' ')
             @_pad\mvaddchstr(old_selected-1,0,@chstrs[old_selected])
 
         if @selected
-            @chstrs[@selected]\set_ch(0, C.ACS_RARROW, color('green bold'))
+            @chstrs[@selected]\set_ch(0, C.ACS_RARROW, Color('green bold'))
             @_pad\mvaddchstr(@selected-1,0,@chstrs[@selected])
 
             scrolloff = 3
@@ -366,17 +453,17 @@ class DataViewer extends Pad
                 @scroll(-10,0)
 
             when C.KEY_RIGHT, ("l")\byte!
-                @chstr_actions[@selected]!
+                expansions[@chstr_locations[@selected]] = true
                 @full_refresh!
             when ("L")\byte!
-                @chstr_actions[@selected]!
+                expansions[@chstr_locations[@selected]] = true
                 @full_refresh!
 
             when C.KEY_LEFT, ("h")\byte!
-                @chstr_actions[@selected]!
+                expansions[@chstr_locations[@selected]] = nil
                 @full_refresh!
             when ("H")\byte!
-                @chstr_actions[@selected]!
+                expansions[@chstr_locations[@selected]] = nil
                 @full_refresh!
 
 ok, to_lua = pcall -> require('moonscript.base').to_lua
@@ -420,7 +507,7 @@ ldb = {
         C.use_default_colors!
 
         do -- Fullscreen flash
-            stdscr\wbkgd(color"yellow on red bold")
+            stdscr\wbkgd(Color"yellow on red bold")
             stdscr\clear!
             stdscr\refresh!
             lines = wrap_text("ERROR!\n \n "..err_msg.."\n \npress any key...", math.floor(SCREEN_W/2))
@@ -436,7 +523,7 @@ ldb = {
             stdscr\getch!
 
         stdscr\keypad!
-        stdscr\wbkgd(color!)
+        stdscr\wbkgd(Color!)
         stdscr\clear!
         stdscr\refresh!
 
@@ -446,8 +533,8 @@ ldb = {
             err_msg_lines = wrap_text(err_msg, SCREEN_W - 4)
             for i,line in ipairs(err_msg_lines)
                 err_msg_lines[i] = (" ")\rep(2)..line
-            pads.err = Pad("Error Message", 0,0,AUTO,SCREEN_W, err_msg_lines, (i)=> color("red bold"))
-            pads.err._frame\attrset(color("red"))
+            pads.err = Pad("Error Message", 0,0,AUTO,SCREEN_W, err_msg_lines, (i)=> Color("red bold"))
+            pads.err._frame\attrset(Color("red"))
             pads.err\refresh!
 
         stack_locations = {}
@@ -485,19 +572,19 @@ ldb = {
             stack_h = math.max(#stack_names+2, math.floor(2/3*SCREEN_H))
             stack_w = math.min(max_fn_name + 3 + max_filename, math.floor(1/3*SCREEN_W))
             pads.stack = Pad "(C)allstack",pads.err.height,SCREEN_W-stack_w,stack_h,stack_w,
-                stack_names, ((i)=> (i == @selected) and color("black on green") or color("green bold")),
-                stack_locations, ((i)=> (i == @selected) and color("black on cyan") or color("cyan bold"))
+                stack_names, ((i)=> (i == @selected) and Color("black on green") or Color("green bold")),
+                stack_locations, ((i)=> (i == @selected) and Color("black on cyan") or Color("cyan bold"))
         
         show_src = (filename, line_no)->
             if pads.src
                 if pads.src.filename == filename
                     pads.src\select(line_no)
                     pads.src.colors[2] = (i)=>
-                        return if i == line_no and i == @selected then color("yellow on red bold")
-                        elseif i == line_no then color("yellow on red")
-                        elseif err_lines["#{filename}:#{i}"] == true then color("red on black bold")
-                        elseif i == @selected then color("reverse")
-                        else color()
+                        return if i == line_no and i == @selected then Color("yellow on red bold")
+                        elseif i == line_no then Color("yellow on red")
+                        elseif err_lines["#{filename}:#{i}"] == true then Color("red on black bold")
+                        elseif i == @selected then Color("reverse")
+                        else Color()
                     for line,_ in pairs(err_lines)
                         _filename, i = line\match("([^:]*):(%d*).*")
                         if _filename == filename and tonumber(i)
@@ -513,11 +600,11 @@ ldb = {
                     table.insert src_lines, line
                 pads.src = NumberedPad "(S)ource Code", pads.err.height,0,
                     pads.stack.height,pads.stack.x, src_lines, (i)=>
-                        return if i == line_no and i == @selected then color("yellow on red bold")
-                        elseif i == line_no then color("yellow on red")
-                        elseif err_lines["#{filename}:#{i}"] == true then color("red on black bold")
-                        elseif i == @selected then color("reverse")
-                        else color()
+                        return if i == line_no and i == @selected then Color("yellow on red bold")
+                        elseif i == line_no then Color("yellow on red")
+                        elseif err_lines["#{filename}:#{i}"] == true then Color("red on black bold")
+                        elseif i == @selected then Color("reverse")
+                        else Color()
                 pads.src\select(line_no)
             else
                 lines = {}
@@ -525,7 +612,7 @@ ldb = {
                 s = "<no source code found>"
                 s = (" ")\rep(math.floor((pads.stack.x-2-#s)/2))..s
                 table.insert(lines, s)
-                pads.src = Pad "(S)ource Code", pads.err.height,0,pads.stack.height,pads.stack.x,lines, ->color("red")
+                pads.src = Pad "(S)ource Code", pads.err.height,0,pads.stack.height,pads.stack.x,lines, ->Color("red")
             pads.src.filename = filename
         
         local stack_env
@@ -556,7 +643,7 @@ ldb = {
             var_x = 0
             --height = math.min(2+#var_names, SCREEN_H-pads.err.height-pads.stack.height)
             height = SCREEN_H-(pads.err.height+pads.stack.height)
-            pads.vars = Pad "(V)ars", var_y,var_x,height,AUTO,var_names, ((i)=> i == @selected and color('reverse') or color())
+            pads.vars = Pad "(V)ars", var_y,var_x,height,AUTO,var_names, ((i)=> i == @selected and Color('reverse') or Color())
 
             pads.vars.on_select = (var_index)=>
                 if var_index == nil then return
@@ -570,7 +657,7 @@ ldb = {
                 switch type_str
                     when "string"
                         pads.values = Pad "(D)ata [string]",var_y,value_x,pads.vars.height,value_w,
-                            wrap_text(value, value_w-2), (i)=>color()
+                            wrap_text(value, value_w-2), (i)=>Color()
                     when "table"
                         value_str = repr(value, 3)
                         mt = getmetatable(value)
@@ -592,22 +679,22 @@ ldb = {
                                     value_str = table.concat ["#{key_repr k} = #{repr v,2}" for k,v in pairs(value)], "\n \n"
 
                         pads.values = Pad "(D)ata [#{type_str}]",var_y,value_x,pads.vars.height,value_w,
-                            wrap_text(value_str, value_w-2), (i)=>color("cyan bold")
+                            wrap_text(value_str, value_w-2), (i)=>Color("cyan bold")
                     when "function"
                         info = debug.getinfo(value, 'nS')
                         s = ("function '%s' defined at %s:%s")\format info.name or var_names[var_index],
                             info.short_src, info.linedefined
                         pads.values = Pad "(D)ata [#{type_str}]",var_y,value_x,pads.vars.height,value_w,
-                            wrap_text(s, value_w-2), (i)=>color("green bold")
+                            wrap_text(s, value_w-2), (i)=>Color("green bold")
                     when "number"
                         pads.values = Pad "(D)ata [#{type_str}]",var_y,value_x,pads.vars.height,value_w,
-                            wrap_text(repr(value), value_w-2), (i)=>color("magenta bold")
+                            wrap_text(repr(value), value_w-2), (i)=>Color("magenta bold")
                     when "boolean"
                         pads.values = Pad "(D)ata [#{type_str}]",var_y,value_x,pads.vars.height,value_w,
-                            wrap_text(repr(value), value_w-2), (i)=> value and color("green bold") or color("red bold")
+                            wrap_text(repr(value), value_w-2), (i)=> value and Color("green bold") or Color("red bold")
                     else
                         pads.values = Pad "(D)ata [#{type_str}]",var_y,value_x,pads.vars.height,value_w,
-                            wrap_text(repr(value), value_w-2), (i)=>color()
+                            wrap_text(repr(value), value_w-2), (i)=>Color()
                 ]]
                 collectgarbage()
                 collectgarbage()
