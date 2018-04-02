@@ -8,6 +8,15 @@ PARENT = {} -- Singleton
 _error = error
 _assert = assert
 
+log = io.open('output.log','w')
+toggle = (field, bit)->
+    if field & bit != 0
+        log\write(("%x ~ %x -> %x\n")\format(field, bit, field & ~bit))
+        field & ~bit
+    else
+        log\write(("%x ~ %x -> %x\n")\format(field, bit, field | bit))
+        field | bit
+
 -- Return the callstack index of the code that actually caused an error and the max index
 callstack_range = ->
     min, max = 0, -1
@@ -278,7 +287,7 @@ make_lines = (location, x, width)->
                         table.insert(_line, C.ACS_BULLET)
                         table.insert(_line, Color('black bold altcharset'))
                     table.insert(_line, subline)
-                    table.insert(_line, Color('blue on black bold'))
+                    table.insert(_line, Color('blue on black'))
                     table.insert(lines, _line)
             return lines
         when 'table'
@@ -288,27 +297,29 @@ make_lines = (location, x, width)->
             lines = {}
             for k,v in pairs(x)
                 if is_key_expanded(location, k) and is_value_expanded(location, k)
-                    table.insert lines, {location:Location(location,KEY,k), 'key/value:', Color('white')}
-                    key_lines = make_lines(Location(location, KEY, k), k, width-2)
+                    table.insert lines, {
+                        location:Location(location,KEY,k), 'key', Color('green bold'),
+                        '/', Color!, 'value', Color('blue bold'), ':', Color('white')}
+                    key_lines = make_lines(Location(location, KEY, k), k, width-1)
                     for i,key_line in ipairs(key_lines)
                         for j=2,#key_line,2
-                            key_line[j] = key_line[j] | C.A_REVERSE
+                            key_line[j] = toggle(key_line[j], C.A_REVERSE)
                         if i == 1
-                            prepend(key_line, C.ACS_LLCORNER, Color!, C.ACS_TTEE, Color!)
+                            prepend(key_line, C.ACS_DIAMOND, Color('green bold'), ' ', Color!)
                         else
-                            prepend(key_line, ' ', Color!, C.ACS_VLINE, Color!)
+                            prepend(key_line, '  ', Color!)
                         table.insert(lines, key_line)
                     value_lines = make_lines(Location(location, VALUE, k), v, width-2)
                     for i,value_line in ipairs(value_lines)
                         if i == 1
-                            prepend(value_line, ' ', Color!, C.ACS_LLCORNER, Color!)
+                            prepend(value_line, C.ACS_DIAMOND, Color('blue bold'), ' ', Color!)
                         else
                             prepend(value_line, '  ', Color!)
                         table.insert(lines, value_line)
                 elseif is_value_expanded(location, k)
                     k_str = type(k) == 'string' and k\gsub('\n','\\n') or repr(k,2)
                     if #k_str > width then k_str = k_str\sub(1,width-3)..'...'
-                    table.insert(lines, {location:Location(location, KEY, k), k_str, type_colors[type(k)] | C.A_REVERSE})
+                    table.insert(lines, {location:Location(location, KEY, k), k_str, toggle(type_colors[type(k)], C.A_REVERSE)})
 
                     v_lines = make_lines(Location(location, VALUE, k), v, width-1)
                     prepend(v_lines[1], C.ACS_LLCORNER, Color!)
@@ -318,7 +329,7 @@ make_lines = (location, x, width)->
                 elseif is_key_expanded(location, k)
                     k_lines = make_lines(Location(location, KEY, k), k, width-1)
                     for k_line in *k_lines
-                        for i=2,#k_line,2 do k_line[i] = k_lin[i] | C.A_REVERSE
+                        for i=2,#k_line,2 do k_line[i] = toggle(k_line[i], C.A_REVERSE)
                     for i=1,#k_lines-1
                         prepend(k_lines[i], ' ', Color!)
                     prepend(k_lines[#k_lines-1], C.ACS_ULCORNER, Color!)
@@ -336,7 +347,7 @@ make_lines = (location, x, width)->
                     if #v_str > v_space then v_str = v_str\sub(1,v_space-3)..'...'
                     table.insert(lines, {
                         location:Location(location, VALUE, k),
-                        k_str, type_colors[type(k)] | C.A_REVERSE,
+                        k_str, toggle(type_colors[type(k)], C.A_REVERSE),
                         ' = ', Color!,
                         v_str, type_colors[type(v)]})
             return lines
@@ -653,49 +664,6 @@ ldb = {
                 type_str = type(value)
                 -- Show single value:
                 pads.values = DataViewer value, "(D)ata [#{type_str}]", var_y,value_x,pads.vars.height,value_w
-                [[
-                switch type_str
-                    when "string"
-                        pads.values = Pad "(D)ata [string]",var_y,value_x,pads.vars.height,value_w,
-                            wrap_text(value, value_w-2), (i)=>Color()
-                    when "table"
-                        value_str = repr(value, 3)
-                        mt = getmetatable(value)
-                        if mt
-                            type_str = if rawget(mt, '__class') and rawget(rawget(mt, '__class'), '__name')
-                                rawget(rawget(mt, '__class'), '__name')
-                            elseif rawget(value, '__base') and rawget(value, '__name') then "class #{rawget(value,'__name')}"
-                            else 'table with metatable'
-                            if rawget(mt, '__tostring')
-                                value_str = tostring(value)
-                            else
-                                if rawget(value, '__base') and rawget(value, '__name')
-                                    value = rawget(value, '__base')
-                                    value_str = repr(value, 3)
-                                if #value_str >= value_w-2
-                                    key_repr = (k)->
-                                        if type(k) == 'string' and k\match("^[%a_][%w_]*$") then k
-                                        else "[#{repr(k,2)}]"
-                                    value_str = table.concat ["#{key_repr k} = #{repr v,2}" for k,v in pairs(value)], "\n \n"
-
-                        pads.values = Pad "(D)ata [#{type_str}]",var_y,value_x,pads.vars.height,value_w,
-                            wrap_text(value_str, value_w-2), (i)=>Color("cyan bold")
-                    when "function"
-                        info = debug.getinfo(value, 'nS')
-                        s = ("function '%s' defined at %s:%s")\format info.name or var_names[var_index],
-                            info.short_src, info.linedefined
-                        pads.values = Pad "(D)ata [#{type_str}]",var_y,value_x,pads.vars.height,value_w,
-                            wrap_text(s, value_w-2), (i)=>Color("green bold")
-                    when "number"
-                        pads.values = Pad "(D)ata [#{type_str}]",var_y,value_x,pads.vars.height,value_w,
-                            wrap_text(repr(value), value_w-2), (i)=>Color("magenta bold")
-                    when "boolean"
-                        pads.values = Pad "(D)ata [#{type_str}]",var_y,value_x,pads.vars.height,value_w,
-                            wrap_text(repr(value), value_w-2), (i)=> value and Color("green bold") or Color("red bold")
-                    else
-                        pads.values = Pad "(D)ata [#{type_str}]",var_y,value_x,pads.vars.height,value_w,
-                            wrap_text(repr(value), value_w-2), (i)=>Color()
-                ]]
                 collectgarbage()
                 collectgarbage()
 
