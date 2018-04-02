@@ -302,13 +302,12 @@ make_lines = (location, x, width)->
                         '/', Color!, 'value', Color('blue bold'), ':', Color('white')}
                     key_lines = make_lines(Location(location, KEY, k), k, width-1)
                     for i,key_line in ipairs(key_lines)
-                        for j=2,#key_line,2
-                            key_line[j] = toggle(key_line[j], C.A_REVERSE)
                         if i == 1
                             prepend(key_line, C.ACS_DIAMOND, Color('green bold'), ' ', Color!)
                         else
                             prepend(key_line, '  ', Color!)
                         table.insert(lines, key_line)
+                    table.insert(lines, {location:Location(location, KEY, k)})
                     value_lines = make_lines(Location(location, VALUE, k), v, width-2)
                     for i,value_line in ipairs(value_lines)
                         if i == 1
@@ -316,10 +315,11 @@ make_lines = (location, x, width)->
                         else
                             prepend(value_line, '  ', Color!)
                         table.insert(lines, value_line)
+                    table.insert(lines, {location:Location(location, VALUE, k)})
                 elseif is_value_expanded(location, k)
                     k_str = type(k) == 'string' and k\gsub('\n','\\n') or repr(k,2)
                     if #k_str > width then k_str = k_str\sub(1,width-3)..'...'
-                    table.insert(lines, {location:Location(location, KEY, k), k_str, toggle(type_colors[type(k)], C.A_REVERSE)})
+                    table.insert(lines, {location:Location(location, KEY, k), k_str, type_colors[type(k)] | C.A_REVERSE})
 
                     v_lines = make_lines(Location(location, VALUE, k), v, width-1)
                     prepend(v_lines[1], C.ACS_LLCORNER, Color!)
@@ -328,11 +328,10 @@ make_lines = (location, x, width)->
                     for v_line in *v_lines do table.insert(lines, v_line)
                 elseif is_key_expanded(location, k)
                     k_lines = make_lines(Location(location, KEY, k), k, width-1)
-                    for k_line in *k_lines
-                        for i=2,#k_line,2 do k_line[i] = toggle(k_line[i], C.A_REVERSE)
                     for i=1,#k_lines-1
                         prepend(k_lines[i], ' ', Color!)
-                    prepend(k_lines[#k_lines-1], C.ACS_ULCORNER, Color!)
+                    -- TODO: make this less ugly
+                    prepend(k_lines[#k_lines], C.ACS_ULCORNER, Color!)
                     for k_line in *k_lines do table.insert(lines, k_line)
 
                     v_str = type(v) == 'string' and v\gsub('\n','\\n') or repr(v,2)
@@ -347,7 +346,7 @@ make_lines = (location, x, width)->
                     if #v_str > v_space then v_str = v_str\sub(1,v_space-3)..'...'
                     table.insert(lines, {
                         location:Location(location, VALUE, k),
-                        k_str, toggle(type_colors[type(k)], C.A_REVERSE),
+                        k_str, type_colors[type(k)] | C.A_REVERSE,
                         ' = ', Color!,
                         v_str, type_colors[type(v)]})
             return lines

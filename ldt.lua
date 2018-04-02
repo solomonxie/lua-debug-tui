@@ -462,9 +462,6 @@ make_lines = function(location, x, width)
         })
         local key_lines = make_lines(Location(location, KEY, k), k, width - 1)
         for i, key_line in ipairs(key_lines) do
-          for j = 2, #key_line, 2 do
-            key_line[j] = toggle(key_line[j], C.A_REVERSE)
-          end
           if i == 1 then
             prepend(key_line, C.ACS_DIAMOND, Color('green bold'), ' ', Color())
           else
@@ -472,6 +469,9 @@ make_lines = function(location, x, width)
           end
           table.insert(lines, key_line)
         end
+        table.insert(lines, {
+          location = Location(location, KEY, k)
+        })
         local value_lines = make_lines(Location(location, VALUE, k), v, width - 2)
         for i, value_line in ipairs(value_lines) do
           if i == 1 then
@@ -481,6 +481,9 @@ make_lines = function(location, x, width)
           end
           table.insert(lines, value_line)
         end
+        table.insert(lines, {
+          location = Location(location, VALUE, k)
+        })
       elseif is_value_expanded(location, k) then
         local k_str = type(k) == 'string' and k:gsub('\n', '\\n') or repr(k, 2)
         if #k_str > width then
@@ -489,7 +492,7 @@ make_lines = function(location, x, width)
         table.insert(lines, {
           location = Location(location, KEY, k),
           k_str,
-          toggle(type_colors[type(k)], C.A_REVERSE)
+          type_colors[type(k)] | C.A_REVERSE
         })
         local v_lines = make_lines(Location(location, VALUE, k), v, width - 1)
         prepend(v_lines[1], C.ACS_LLCORNER, Color())
@@ -502,16 +505,10 @@ make_lines = function(location, x, width)
         end
       elseif is_key_expanded(location, k) then
         local k_lines = make_lines(Location(location, KEY, k), k, width - 1)
-        for _index_0 = 1, #k_lines do
-          local k_line = k_lines[_index_0]
-          for i = 2, #k_line, 2 do
-            k_line[i] = toggle(k_line[i], C.A_REVERSE)
-          end
-        end
         for i = 1, #k_lines - 1 do
           prepend(k_lines[i], ' ', Color())
         end
-        prepend(k_lines[#k_lines - 1], C.ACS_ULCORNER, Color())
+        prepend(k_lines[#k_lines], C.ACS_ULCORNER, Color())
         for _index_0 = 1, #k_lines do
           local k_line = k_lines[_index_0]
           table.insert(lines, k_line)
@@ -539,7 +536,7 @@ make_lines = function(location, x, width)
         table.insert(lines, {
           location = Location(location, VALUE, k),
           k_str,
-          toggle(type_colors[type(k)], C.A_REVERSE),
+          type_colors[type(k)] | C.A_REVERSE,
           ' = ',
           Color(),
           v_str,
