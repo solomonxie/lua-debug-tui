@@ -863,7 +863,7 @@ ldb = {
                     C.use_default_colors!
                     stdscr\clear!
                     stdscr\refresh!
-                    for _,pad in pairs(pads) do pad\refresh!
+                    for _,pad in pairs(pads) do pad\refresh(true)
                 
                 when C.KEY_RESIZE
                     SCREEN_H, SCREEN_W = stdscr\getmaxyx!

@@ -1249,7 +1249,7 @@ ldb = {
         stdscr:clear()
         stdscr:refresh()
         for _, pad in pairs(pads) do
-          pad:refresh()
+          pad:refresh(true)
         end
       elseif C.KEY_RESIZE == _exp_0 then
         SCREEN_H, SCREEN_W = stdscr:getmaxyx()
