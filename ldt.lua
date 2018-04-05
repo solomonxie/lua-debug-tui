@@ -374,6 +374,9 @@ local TOP_LOCATION = { }
 local locations = { }
 local Location
 Location = function(old_loc, kind, key)
+  if old_loc == nil then
+    return TOP_LOCATION
+  end
   if not (locations[old_loc]) then
     locations[old_loc] = { }
   end
@@ -381,7 +384,11 @@ Location = function(old_loc, kind, key)
     locations[old_loc][kind] = { }
   end
   if not (locations[old_loc][kind][key]) then
-    locations[old_loc][kind][key] = { }
+    locations[old_loc][kind][key] = {
+      old_loc = old_loc,
+      kind = kind,
+      key = key
+    }
   end
   return locations[old_loc][kind][key]
 end
@@ -401,23 +408,134 @@ local is_value_expanded
 is_value_expanded = function(location, key)
   return expansions[Location(location, VALUE, key)]
 end
+local TYPE_COLORS = setmetatable({ }, {
+  __index = 0
+})
+local colored_repr
+colored_repr = function(x, width, depth)
+  if depth == nil then
+    depth = 2
+  end
+  depth = depth - 1
+  local x_type = type(x)
+  if x_type == 'table' then
+    if next(x) == nil then
+      return {
+        "{}",
+        TYPE_COLORS.table
+      }
+    end
+    if depth == 0 then
+      return {
+        "{",
+        TYPE_COLORS.table,
+        "...",
+        Color('white'),
+        "}",
+        TYPE_COLORS.table
+      }
+    end
+    local ret = {
+      "{",
+      TYPE_COLORS.table
+    }
+    local i = 1
+    for k, v in pairs(x) do
+      if k == i then
+        local _list_0 = colored_repr(x[i], width, depth)
+        for _index_0 = 1, #_list_0 do
+          local s = _list_0[_index_0]
+          ret[#ret + 1] = s
+        end
+        i = i + 1
+      else
+        local _list_0 = colored_repr(k, width, depth)
+        for _index_0 = 1, #_list_0 do
+          local s = _list_0[_index_0]
+          ret[#ret + 1] = s
+        end
+        ret[#ret + 1] = ' = '
+        ret[#ret + 1] = Color('white')
+        local _list_1 = colored_repr(v, width, depth)
+        for _index_0 = 1, #_list_1 do
+          local s = _list_1[_index_0]
+          ret[#ret + 1] = s
+        end
+      end
+      ret[#ret + 1] = ', '
+      ret[#ret + 1] = Color('white')
+    end
+    if #ret > 2 then
+      ret[#ret] = nil
+      ret[#ret] = nil
+    end
+    local len = 0
+    for i = 1, #ret - 1, 2 do
+      len = len + #ret[i]
+    end
+    for i = #ret - 1, 3, -2 do
+      if len <= width - 1 then
+        break
+      end
+      if ret[i + 2] then
+        ret[i + 2], ret[i + 3] = nil, nil
+      end
+      ret[i] = '...'
+      ret[i + 1] = Color('white')
+    end
+    ret[#ret + 1] = '}'
+    ret[#ret + 1] = TYPE_COLORS.table
+    return ret
+  elseif x_type == 'string' then
+    local ret = {
+      (x:match('^[^\n]*')),
+      TYPE_COLORS.string
+    }
+    for line in x:gmatch('\n([^\n]*)') do
+      ret[#ret + 1] = '\\n'
+      ret[#ret + 1] = Color('white on black')
+      ret[#ret + 1] = line
+      ret[#ret + 1] = TYPE_COLORS.string
+    end
+    local len = 0
+    for i = 1, #ret - 1, 2 do
+      len = len + #ret[i]
+    end
+    for i = #ret - 1, 1, -2 do
+      if len <= width then
+        break
+      end
+      if ret[i + 2] then
+        ret[i + 2], ret[i + 3] = nil, nil
+      end
+      len = len - #ret[i]
+      if len <= width then
+        ret[i] = ret[i]:sub(1, width - len - 3)
+        ret[i + 2] = '...'
+        ret[i + 3] = Color('blue')
+        break
+      end
+    end
+    return ret
+  else
+    local s = tostring(x)
+    if #s > width then
+      return {
+        s:sub(1, width - 3),
+        TYPE_COLORS[type(x)],
+        '...',
+        Color('blue')
+      }
+    else
+      return {
+        s,
+        TYPE_COLORS[type(x)]
+      }
+    end
+  end
+end
 local make_lines
 make_lines = function(location, x, width)
-  local type_colors = {
-    string = Color('blue on black'),
-    number = Color('magenta'),
-    boolean = Color('yellow'),
-    ["nil"] = Color('cyan'),
-    table = Color('white bold'),
-    ["function"] = Color('green'),
-    userdata = Color('cyan bold'),
-    thread = Color('blue')
-  }
-  setmetatable(type_colors, {
-    __index = function()
-      return Color('red bold')
-    end
-  })
   local _exp_0 = type(x)
   if 'string' == _exp_0 then
     local lines = { }
@@ -437,6 +555,13 @@ make_lines = function(location, x, width)
         table.insert(_line, Color('blue on black'))
         table.insert(lines, _line)
       end
+    end
+    if #lines == 0 then
+      table.insert(lines, {
+        location = location,
+        "''",
+        Color('blue')
+      })
     end
     return lines
   elseif 'table' == _exp_0 then
@@ -463,86 +588,80 @@ make_lines = function(location, x, width)
         local key_lines = make_lines(Location(location, KEY, k), k, width - 1)
         for i, key_line in ipairs(key_lines) do
           if i == 1 then
-            prepend(key_line, C.ACS_DIAMOND, Color('green bold'), ' ', Color())
+            prepend(key_line, ' ', Color(), C.ACS_DIAMOND, Color('green bold'), ' ', Color())
           else
-            prepend(key_line, '  ', Color())
+            prepend(key_line, '   ', Color())
           end
           table.insert(lines, key_line)
         end
-        table.insert(lines, {
-          location = Location(location, KEY, k)
-        })
         local value_lines = make_lines(Location(location, VALUE, k), v, width - 2)
         for i, value_line in ipairs(value_lines) do
           if i == 1 then
-            prepend(value_line, C.ACS_DIAMOND, Color('blue bold'), ' ', Color())
+            prepend(value_line, ' ', Color(), C.ACS_DIAMOND, Color('blue bold'), ' ', Color())
           else
-            prepend(value_line, '  ', Color())
+            prepend(value_line, '   ', Color())
           end
           table.insert(lines, value_line)
         end
-        table.insert(lines, {
-          location = Location(location, VALUE, k)
-        })
       elseif is_value_expanded(location, k) then
-        local k_str = type(k) == 'string' and k:gsub('\n', '\\n') or repr(k, 2)
-        if #k_str > width then
-          k_str = k_str:sub(1, width - 3) .. '...'
-        end
+        local k_str = colored_repr(k, width - 1)
         table.insert(lines, {
           location = Location(location, KEY, k),
-          k_str,
-          type_colors[type(k)] | C.A_REVERSE
+          '-',
+          Color('red'),
+          unpack(k_str)
         })
         local v_lines = make_lines(Location(location, VALUE, k), v, width - 1)
-        prepend(v_lines[1], C.ACS_LLCORNER, Color())
+        prepend(v_lines[1], '  ', Color())
         for i = 2, #v_lines do
-          prepend(v_lines[i], ' ', Color())
+          prepend(v_lines[i], '  ', Color())
         end
         for _index_0 = 1, #v_lines do
           local v_line = v_lines[_index_0]
           table.insert(lines, v_line)
         end
       elseif is_key_expanded(location, k) then
-        local k_lines = make_lines(Location(location, KEY, k), k, width - 1)
-        for i = 1, #k_lines - 1 do
-          prepend(k_lines[i], ' ', Color())
+        local k_lines = make_lines(Location(location, KEY, k), k, width - 4)
+        for i = 1, #k_lines do
+          prepend(k_lines[i], '    ', Color())
         end
-        prepend(k_lines[#k_lines], C.ACS_ULCORNER, Color())
         for _index_0 = 1, #k_lines do
           local k_line = k_lines[_index_0]
           table.insert(lines, k_line)
         end
-        local v_str = type(v) == 'string' and v:gsub('\n', '\\n') or repr(v, 2)
-        if #v_str > width then
-          v_str = v_str:sub(1, width - 3) .. '...'
-        end
+        local v_str = colored_repr(v, width - 2)
         table.insert(lines, {
           location = Location(location, VALUE, k),
-          v_str,
-          type_colors[type(v)]
+          '  ',
+          Color(),
+          unpack(v_str)
         })
       else
-        local k_space = math.floor((width - 3) / 3)
-        local k_str = type(k) == 'string' and k:gsub('\n', '\\n') or repr(k, 2)
-        if #k_str > k_space then
-          k_str = k_str:sub(1, k_space - 3) .. '...'
-        end
-        local v_space = (width - 3) - #k_str
-        local v_str = type(v) == 'string' and v:gsub('\n', '\\n') or repr(v, 2)
-        if #v_str > v_space then
-          v_str = v_str:sub(1, v_space - 3) .. '...'
-        end
-        table.insert(lines, {
+        local k_space = math.floor((width - 4) / 3)
+        local k_str = colored_repr(k, k_space)
+        local v_space = (width - 4) - #k_str
+        local v_str = colored_repr(v, v_space)
+        local line = {
           location = Location(location, VALUE, k),
-          k_str,
-          type_colors[type(k)] | C.A_REVERSE,
-          ' = ',
-          Color(),
-          v_str,
-          type_colors[type(v)]
-        })
+          '+',
+          Color('green'),
+          unpack(k_str)
+        }
+        table.insert(line, ' = ')
+        table.insert(line, Color('white'))
+        for _index_0 = 1, #v_str do
+          local s = v_str[_index_0]
+          table.insert(line, s)
+        end
+        table.insert(lines, line)
       end
+    end
+    if #lines == 0 then
+      table.insert(lines, {
+        location = location,
+        '{}',
+        TYPE_COLORS.table
+      })
     end
     return lines
   else
@@ -554,7 +673,7 @@ make_lines = function(location, x, width)
       {
         location = location,
         str,
-        type_colors[type(x)]
+        TYPE_COLORS[type(x)]
       }
     }
   end
@@ -583,11 +702,11 @@ do
       local old_selected
       old_selected, self.selected = self.selected, i
       if old_selected and self.chstrs[old_selected] then
-        self.chstrs[old_selected]:set_str(0, ' ')
+        self.chstrs[old_selected]:set_str(0, ' ', Color('yellow bold'))
         self._pad:mvaddchstr(old_selected - 1, 0, self.chstrs[old_selected])
       end
       if self.selected then
-        self.chstrs[self.selected]:set_ch(0, C.ACS_RARROW, Color('green bold'))
+        self.chstrs[self.selected]:set_ch(0, C.ACS_RARROW, Color('yellow bold'))
         self._pad:mvaddchstr(self.selected - 1, 0, self.chstrs[self.selected])
         local scrolloff = 3
         if self.selected > self.scroll_y + (self.height - 2) - scrolloff then
@@ -630,11 +749,49 @@ do
         expansions[self.chstr_locations[self.selected]] = true
         return self:full_refresh()
       elseif C.KEY_LEFT == _exp_0 or ("h"):byte() == _exp_0 then
-        expansions[self.chstr_locations[self.selected]] = nil
-        return self:full_refresh()
+        local loc = self.chstr_locations[self.selected]
+        if expansions[loc] == nil then
+          loc = Location(loc.old_loc, (loc.kind == KEY and VALUE or KEY), loc.key)
+        end
+        while loc and expansions[loc] == nil do
+          loc = loc.old_loc
+        end
+        if loc then
+          expansions[loc] = nil
+        end
+        self:full_refresh()
+        if loc and self.chstr_locations[self.selected] ~= loc then
+          for i, chstr_loc in ipairs(self.chstr_locations) do
+            if chstr_loc == loc then
+              self:select(i)
+              break
+            end
+          end
+        elseif not loc then
+          return self:select(1)
+        end
       elseif ("H"):byte() == _exp_0 then
-        expansions[self.chstr_locations[self.selected]] = nil
-        return self:full_refresh()
+        local loc = self.chstr_locations[self.selected]
+        if expansions[loc] == nil then
+          loc = Location(loc.old_loc, (loc.kind == KEY and VALUE or KEY), loc.key)
+        end
+        while loc and expansions[loc] == nil do
+          loc = loc.old_loc
+        end
+        if loc then
+          expansions[loc] = nil
+        end
+        self:full_refresh()
+        if loc and self.chstr_locations[self.selected] ~= loc then
+          for i, chstr_loc in ipairs(self.chstr_locations) do
+            if chstr_loc == loc then
+              self:select(i)
+              break
+            end
+          end
+        elseif not loc then
+          return self:select(1)
+        end
       end
     end
   }
@@ -656,6 +813,11 @@ do
         local lines = make_lines(TOP_LOCATION, self.data, W)
         for i, line in ipairs(lines) do
           local chstr = C.new_chstr(W)
+          if i == self.selected then
+            chstr:set_ch(0, C.ACS_RARROW, Color('yellow bold'))
+          else
+            chstr:set_str(0, ' ', Color('yellow bold'))
+          end
           local offset = 1
           for j = 1, #line - 1, 2 do
             local chunk, attrs = line[j], line[j + 1]
@@ -775,6 +937,16 @@ ldb = {
     C.curs_set(0)
     C.start_color()
     C.use_default_colors()
+    do
+      TYPE_COLORS.string = Color('blue on black')
+      TYPE_COLORS.number = Color('magenta')
+      TYPE_COLORS.boolean = Color('cyan')
+      TYPE_COLORS["nil"] = Color('cyan')
+      TYPE_COLORS.table = Color('yellow')
+      TYPE_COLORS["function"] = Color('green')
+      TYPE_COLORS.userdata = Color('cyan bold')
+      TYPE_COLORS.thread = Color('blue')
+    end
     do
       stdscr:wbkgd(Color("yellow on red bold"))
       stdscr:clear()
