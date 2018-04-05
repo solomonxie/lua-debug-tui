@@ -2,9 +2,9 @@
 
 This is a text-based user interface command line debugging utility for Lua and Moonscript.
 It lets you browse the call stack, source code, and local variables right at the moment when
-your code crashes, or you call `ldt.breakpoint()`. Moonscript is fully supported, so the
+your code crashes (or when `ldt.breakpoint()` is called). Moonscript is fully supported, so the
 callstack and source code panes will display the correct source for functions written in
-Moonscript.
+Moonscript. It looks like this:
 
 ![preview](preview.png)
 
