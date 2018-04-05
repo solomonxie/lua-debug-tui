@@ -1278,9 +1278,12 @@ ldb = {
     return C.endwin()
   end,
   guard = function(fn, ...)
-    return xpcall(fn, (function(err_msg)
-      return xpcall(ldb.run_debugger, err_hand, err_msg)
-    end), ...)
+    local handler
+    handler = function(err_msg)
+      xpcall(ldb.run_debugger, err_hand, err_msg)
+      return print(debug.traceback(err_msg, 2))
+    end
+    return xpcall(fn, handler, ...)
   end,
   breakpoint = function()
     return xpcall(ldb.run_debugger, err_hand, "Breakpoint triggered!")

@@ -895,7 +895,10 @@ ldb = {
         C.endwin!
 
     guard: (fn, ...)->
-        return xpcall(fn, ((err_msg)-> xpcall(ldb.run_debugger, err_hand, err_msg)), ...)
+        handler = (err_msg)->
+            xpcall(ldb.run_debugger, err_hand, err_msg)
+            print(debug.traceback(err_msg, 2))
+        return xpcall(fn, handler, ...)
 
     breakpoint: ->
         return xpcall(ldb.run_debugger, err_hand, "Breakpoint triggered!")
