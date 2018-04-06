@@ -1,6 +1,5 @@
 C = require "curses"
 re = require 're'
-repr = require 'repr'
 local ldb
 AUTO = {} -- Singleton
 PARENT = {} -- Singleton
@@ -126,7 +125,7 @@ class Pad
             @width = @_width + 2
 
     setup_chstr: (i)=>
-        chstr = _assert(@chstrs[i], "Failed to find chstrs[#{repr i}]")
+        chstr = _assert(@chstrs[i], "Failed to find chstrs[#{i}]")
         x = 0
         for c=1,#@columns
             attr = @colors[c](@, i)
@@ -417,7 +416,7 @@ make_lines = (location, x, width)->
                 table.insert lines, {:location, '{}', TYPE_COLORS.table}
             return lines
         else
-            str = repr(x,2)
+            str = tostring(x)
             if #str > width
                 str = str\sub(1,width-3)..'...'
             return {{:location, str, TYPE_COLORS[type(x)]}}
@@ -745,14 +744,6 @@ ldb = {
                 table.insert(var_names, tostring(name))
                 table.insert(values, value)
                 stack_env[name] = value
-                [[
-                if type(value) == 'function'
-                    info = debug.getinfo(value, 'nS')
-                    --values\add_line(("function: %s @ %s:%s")\format(info.name or '???', info.short_src, info.linedefined))
-                    table.insert(values, repr(info))
-                else
-                    table.insert(values, repr(value))
-                    ]]
             
             var_y = pads.stack.y + pads.stack.height
             var_x = 0
@@ -841,7 +832,11 @@ ldb = {
                     else
                         ret = run_fn!
                         if ret != nil
-                            output ..= '= '..repr(ret)..'\n'
+                            output ..= '= '
+                            bits = colored_repr(ret, SCREEN_W-2, 4)
+                            for i=1,#bits-1,2
+                                output ..= bits[i]
+                            output ..= '\n'
                         numlines = 0
                         for nl in output\gmatch('\n') do numlines += 1
                         stdscr\mvaddstr(SCREEN_H-numlines, 0, output)

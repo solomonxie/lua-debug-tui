@@ -1,6 +1,5 @@
 local C = require("curses")
 local re = require('re')
-local repr = require('repr')
 local ldb
 local AUTO = { }
 local PARENT = { }
@@ -129,7 +128,7 @@ do
       end
     end,
     setup_chstr = function(self, i)
-      local chstr = _assert(self.chstrs[i], "Failed to find chstrs[" .. tostring(repr(i)) .. "]")
+      local chstr = _assert(self.chstrs[i], "Failed to find chstrs[" .. tostring(i) .. "]")
       local x = 0
       for c = 1, #self.columns do
         local attr = self.colors[c](self, i)
@@ -665,7 +664,7 @@ make_lines = function(location, x, width)
     end
     return lines
   else
-    local str = repr(x, 2)
+    local str = tostring(x)
     if #str > width then
       str = str:sub(1, width - 3) .. '...'
     end
@@ -1118,13 +1117,6 @@ ldb = {
         table.insert(var_names, tostring(name))
         table.insert(values, value)
         stack_env[name] = value
-        _ = [[                if type(value) == 'function'
-                    info = debug.getinfo(value, 'nS')
-                    --values\add_line(("function: %s @ %s:%s")\format(info.name or '???', info.short_src, info.linedefined))
-                    table.insert(values, repr(info))
-                else
-                    table.insert(values, repr(value))
-                    ]]
       end
       local var_y = pads.stack.y + pads.stack.height
       local var_x = 0
@@ -1225,7 +1217,12 @@ ldb = {
         else
           local ret = run_fn()
           if ret ~= nil then
-            output = output .. ('= ' .. repr(ret) .. '\n')
+            output = output .. '= '
+            local bits = colored_repr(ret, SCREEN_W - 2, 4)
+            for i = 1, #bits - 1, 2 do
+              output = output .. bits[i]
+            end
+            output = output .. '\n'
           end
           local numlines = 0
           for nl in output:gmatch('\n') do
