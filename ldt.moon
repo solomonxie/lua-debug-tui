@@ -795,11 +795,13 @@ ldb = {
             switch c
                 when (':')\byte!, ('>')\byte!, ('?')\byte!
                     C.echo(true)
+                    print_nil = false
                     code = ''
                     if c == ('?')\byte!
                         stdscr\mvaddstr(SCREEN_H-1, 0, "? "..(' ')\rep(SCREEN_W-1))
                         stdscr\move(SCREEN_H-1, 2)
                         code = 'return '..stdscr\getstr!
+                        print_nil = true
                     elseif c == (':')\byte! or c == ('>')\byte!
                         numlines = 1
                         stdscr\mvaddstr(SCREEN_H-1, 0, "> "..(' ')\rep(SCREEN_W-1))
@@ -831,7 +833,7 @@ ldb = {
                         stdscr\addstr(err_msg)
                     else
                         ret = run_fn!
-                        if ret != nil
+                        if ret != nil or print_nil
                             output ..= '= '
                             bits = colored_repr(ret, SCREEN_W-2, 4)
                             for i=1,#bits-1,2

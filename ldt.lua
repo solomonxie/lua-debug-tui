@@ -1169,11 +1169,13 @@ ldb = {
       local _exp_0 = c
       if (':'):byte() == _exp_0 or ('>'):byte() == _exp_0 or ('?'):byte() == _exp_0 then
         C.echo(true)
+        local print_nil = false
         local code = ''
         if c == ('?'):byte() then
           stdscr:mvaddstr(SCREEN_H - 1, 0, "? " .. (' '):rep(SCREEN_W - 1))
           stdscr:move(SCREEN_H - 1, 2)
           code = 'return ' .. stdscr:getstr()
+          print_nil = true
         elseif c == (':'):byte() or c == ('>'):byte() then
           local numlines = 1
           stdscr:mvaddstr(SCREEN_H - 1, 0, "> " .. (' '):rep(SCREEN_W - 1))
@@ -1216,7 +1218,7 @@ ldb = {
           stdscr:addstr(err_msg)
         else
           local ret = run_fn()
-          if ret ~= nil then
+          if ret ~= nil or print_nil then
             output = output .. '= '
             local bits = colored_repr(ret, SCREEN_W - 2, 4)
             for i = 1, #bits - 1, 2 do
