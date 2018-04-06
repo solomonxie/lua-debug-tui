@@ -39,3 +39,5 @@ a nil value do not call `error()`, so the debugger won't get triggered.
 * Press 'v' to select the variables pane (showing the variables at the selected level of the callstack)
 * Press 'd' to select the data pane (showing the value of the selected variable)
     * In the data pane, 'l'/right will expand table entries, and 'h'/left will collapse table entries.
+* Press ':' or '>' to type in a command to be run in the current Lua context. The debugger will keep reading until a blank line is reached.
+* Press '?' to type in an expression to be evaluated and printed.
