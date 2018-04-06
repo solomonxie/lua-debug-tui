@@ -7,13 +7,10 @@ PARENT = {} -- Singleton
 _error = error
 _assert = assert
 
-log = io.open('output.log','w')
 toggle = (field, bit)->
     if field & bit != 0
-        log\write(("%x ~ %x -> %x\n")\format(field, bit, field & ~bit))
         field & ~bit
     else
-        log\write(("%x ~ %x -> %x\n")\format(field, bit, field | bit))
         field | bit
 
 -- Return the callstack index of the code that actually caused an error and the max index
@@ -310,9 +307,9 @@ colored_repr = (x, width, depth=2)->
         ret[#ret+1] = TYPE_COLORS.table
         return ret
     elseif x_type == 'string'
-        ret = {(x\match('^[^\n]*')), TYPE_COLORS.string}
-        for line in x\gmatch('\n([^\n]*)')
-            ret[#ret+1] = '\\n'
+        ret = {(x\match('^[^\t\r\v\b\a\n]*')), TYPE_COLORS.string}
+        for escape, line in x\gmatch('([\t\r\v\b\a\n])([^\t\r\v\b\a\n]*)')
+            ret[#ret+1] = '\\'..({['\t']:'t',['\r']:'r',['\v']:'v',['\b']:'b',['\a']:'a',['\n']:'n'})[escape]
             ret[#ret+1] = Color('white on black')
             ret[#ret+1] = line
             ret[#ret+1] = TYPE_COLORS.string
@@ -834,14 +831,31 @@ ldb = {
                     else
                         ret = run_fn!
                         if ret != nil or print_nil
-                            output ..= '= '
-                            bits = colored_repr(ret, SCREEN_W-2, 4)
-                            for i=1,#bits-1,2
-                                output ..= bits[i]
-                            output ..= '\n'
-                        numlines = 0
-                        for nl in output\gmatch('\n') do numlines += 1
-                        stdscr\mvaddstr(SCREEN_H-numlines, 0, output)
+                            value_bits = {'= ', Color('yellow'), unpack(colored_repr(ret, SCREEN_W-2, 4))}
+                            numlines = 1
+                            for i=1,#value_bits-1,2
+                                for nl in value_bits[i]\gmatch('\n') do numlines += 1
+                            for nl in output\gmatch('\n') do numlines += 1
+                            y, x = SCREEN_H-numlines, 0
+                            if output != ""
+                                stdscr\mvaddstr(SCREEN_H-numlines, 0, output)
+                                for nl in output\gmatch('\n') do y += 1
+                            for i=1,#value_bits-1,2
+                                stdscr\attrset(value_bits[i+1])
+                                first_line = value_bits[i]\match('^[^\n]*')
+                                stdscr\mvaddstr(y, x, first_line)
+                                x += #first_line
+                                for line in value_bits[i]\gmatch('\n([^\n]*)')
+                                    stdscr\mvaddstr(y,x,(' ')\rep(SCREEN_W-x))
+                                    y += 1
+                                    x = 0
+                                    stdscr\mvaddstr(y, x, line)
+                            stdscr\attrset(Color!)
+                            stdscr\mvaddstr(y,x,(' ')\rep(SCREEN_W-x))
+                        else
+                            numlines = 0
+                            for nl in output\gmatch('\n') do numlines += 1
+                            stdscr\mvaddstr(SCREEN_H-numlines, 0, output)
 
 
                 when ('o')\byte!

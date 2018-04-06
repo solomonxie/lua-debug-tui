@@ -5,14 +5,11 @@ local AUTO = { }
 local PARENT = { }
 local _error = error
 local _assert = assert
-local log = io.open('output.log', 'w')
 local toggle
 toggle = function(field, bit)
   if field & bit ~= 0 then
-    log:write(("%x ~ %x -> %x\n"):format(field, bit, field & ~bit))
     return field & ~bit
   else
-    log:write(("%x ~ %x -> %x\n"):format(field, bit, field | bit))
     return field | bit
   end
 end
@@ -487,11 +484,18 @@ colored_repr = function(x, width, depth)
     return ret
   elseif x_type == 'string' then
     local ret = {
-      (x:match('^[^\n]*')),
+      (x:match('^[^\t\r\v\b\a\n]*')),
       TYPE_COLORS.string
     }
-    for line in x:gmatch('\n([^\n]*)') do
-      ret[#ret + 1] = '\\n'
+    for escape, line in x:gmatch('([\t\r\v\b\a\n])([^\t\r\v\b\a\n]*)') do
+      ret[#ret + 1] = '\\' .. ({
+        ['\t'] = 't',
+        ['\r'] = 'r',
+        ['\v'] = 'v',
+        ['\b'] = 'b',
+        ['\a'] = 'a',
+        ['\n'] = 'n'
+      })[escape]
       ret[#ret + 1] = Color('white on black')
       ret[#ret + 1] = line
       ret[#ret + 1] = TYPE_COLORS.string
@@ -1219,18 +1223,48 @@ ldb = {
         else
           local ret = run_fn()
           if ret ~= nil or print_nil then
-            output = output .. '= '
-            local bits = colored_repr(ret, SCREEN_W - 2, 4)
-            for i = 1, #bits - 1, 2 do
-              output = output .. bits[i]
+            local value_bits = {
+              '= ',
+              Color('yellow'),
+              unpack(colored_repr(ret, SCREEN_W - 2, 4))
+            }
+            local numlines = 1
+            for i = 1, #value_bits - 1, 2 do
+              for nl in value_bits[i]:gmatch('\n') do
+                numlines = numlines + 1
+              end
             end
-            output = output .. '\n'
+            for nl in output:gmatch('\n') do
+              numlines = numlines + 1
+            end
+            local y, x = SCREEN_H - numlines, 0
+            if output ~= "" then
+              stdscr:mvaddstr(SCREEN_H - numlines, 0, output)
+              for nl in output:gmatch('\n') do
+                y = y + 1
+              end
+            end
+            for i = 1, #value_bits - 1, 2 do
+              stdscr:attrset(value_bits[i + 1])
+              local first_line = value_bits[i]:match('^[^\n]*')
+              stdscr:mvaddstr(y, x, first_line)
+              x = x + #first_line
+              for line in value_bits[i]:gmatch('\n([^\n]*)') do
+                stdscr:mvaddstr(y, x, (' '):rep(SCREEN_W - x))
+                y = y + 1
+                x = 0
+                stdscr:mvaddstr(y, x, line)
+              end
+            end
+            stdscr:attrset(Color())
+            stdscr:mvaddstr(y, x, (' '):rep(SCREEN_W - x))
+          else
+            local numlines = 0
+            for nl in output:gmatch('\n') do
+              numlines = numlines + 1
+            end
+            stdscr:mvaddstr(SCREEN_H - numlines, 0, output)
           end
-          local numlines = 0
-          for nl in output:gmatch('\n') do
-            numlines = numlines + 1
-          end
-          stdscr:mvaddstr(SCREEN_H - numlines, 0, output)
         end
       elseif ('o'):byte() == _exp_0 then
         local file = stack_locations[pads.stack.selected]
