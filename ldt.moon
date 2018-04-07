@@ -599,6 +599,7 @@ err_hand = (err)->
 ldb = {
     run_debugger: (err_msg)->
         err_msg or= ''
+        if type(err_msg) != 'string' then err_msg = tostring(err_msg)
         stdscr = C.initscr!
         SCREEN_H, SCREEN_W = stdscr\getmaxyx!
         C.cbreak!
@@ -621,7 +622,7 @@ ldb = {
             stdscr\wbkgd(Color"yellow on red bold")
             stdscr\clear!
             stdscr\refresh!
-            lines = wrap_text("ERROR!\n \n "..err_msg.."\n \npress any key...", math.floor(SCREEN_W/2))
+            lines = wrap_text("ERROR!\n \n "..err_msg.."\n \npress any key...", math.floor(SCREEN_W-2))
             max_line = 0
             for line in *lines do max_line = math.max(max_line, #line)
             for i, line in ipairs(lines)
@@ -752,7 +753,7 @@ ldb = {
                 if var_index == nil then return
                 value_x = pads.vars.x+pads.vars.width
                 value_w = SCREEN_W-(value_x)
-                value = values[var_index]
+                value = stack_env[var_names[var_index]]--values[var_index]
                 type_str = type(value)
                 -- Show single value:
                 pads.values = DataViewer value, "(D)ata [#{type_str}]", var_y,value_x,pads.vars.height,value_w

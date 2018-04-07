@@ -932,6 +932,9 @@ end
 ldb = {
   run_debugger = function(err_msg)
     err_msg = err_msg or ''
+    if type(err_msg) ~= 'string' then
+      err_msg = tostring(err_msg)
+    end
     local stdscr = C.initscr()
     local SCREEN_H, SCREEN_W = stdscr:getmaxyx()
     C.cbreak()
@@ -954,7 +957,7 @@ ldb = {
       stdscr:wbkgd(Color("yellow on red bold"))
       stdscr:clear()
       stdscr:refresh()
-      local lines = wrap_text("ERROR!\n \n " .. err_msg .. "\n \npress any key...", math.floor(SCREEN_W / 2))
+      local lines = wrap_text("ERROR!\n \n " .. err_msg .. "\n \npress any key...", math.floor(SCREEN_W - 2))
       local max_line = 0
       for _index_0 = 1, #lines do
         local line = lines[_index_0]
@@ -1134,7 +1137,7 @@ ldb = {
         end
         local value_x = pads.vars.x + pads.vars.width
         local value_w = SCREEN_W - (value_x)
-        local value = values[var_index]
+        local value = stack_env[var_names[var_index]]
         local type_str = type(value)
         pads.values = DataViewer(value, "(D)ata [" .. tostring(type_str) .. "]", var_y, value_x, pads.vars.height, value_w)
         collectgarbage()
