@@ -413,6 +413,17 @@ make_lines = (location, x, width)->
                 table.insert lines, {:location, '{}', TYPE_COLORS.table}
             return lines
         else
+            if getmetatable(x) and getmetatable(x).__pairs
+                lines = make_lines(location, {k,v for k,v in pairs(x)}, width)
+                if getmetatable(x).__tostring
+                    s_lines = {}
+                    for line in *line_matcher\match(tostring(x))
+                        wrapped = wrap_text(line, width)
+                        for i,subline in ipairs(wrapped)
+                            table.insert(s_lines, {:location, subline, Color('yellow')})
+                    for i=1,#s_lines
+                        table.insert(lines, i, s_lines[i])
+                return lines
             str = tostring(x)
             if #str > width
                 str = str\sub(1,width-3)..'...'

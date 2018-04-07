@@ -668,6 +668,34 @@ make_lines = function(location, x, width)
     end
     return lines
   else
+    if getmetatable(x) and getmetatable(x).__pairs then
+      local lines = make_lines(location, (function()
+        local _tbl_0 = { }
+        for k, v in pairs(x) do
+          _tbl_0[k] = v
+        end
+        return _tbl_0
+      end)(), width)
+      if getmetatable(x).__tostring then
+        local s_lines = { }
+        local _list_0 = line_matcher:match(tostring(x))
+        for _index_0 = 1, #_list_0 do
+          local line = _list_0[_index_0]
+          local wrapped = wrap_text(line, width)
+          for i, subline in ipairs(wrapped) do
+            table.insert(s_lines, {
+              location = location,
+              subline,
+              Color('yellow')
+            })
+          end
+        end
+        for i = 1, #s_lines do
+          table.insert(lines, i, s_lines[i])
+        end
+      end
+      return lines
+    end
     local str = tostring(x)
     if #str > width then
       str = str:sub(1, width - 3) .. '...'
