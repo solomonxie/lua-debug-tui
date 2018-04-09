@@ -660,6 +660,7 @@ ldb = {
             pads.err._frame\attrset(Color("red"))
             pads.err\refresh!
 
+        stack_sources = {}
         stack_locations = {}
         err_lines = {}
         do -- Stack pad
@@ -669,14 +670,18 @@ ldb = {
             for i=stack_min,stack_max
                 info = debug.getinfo(i)
                 if not info then break
-                fn_name = info.name or "<unnamed function>"
+                fn_name = info.name
+                unless fn_name
+                    fn_name = if info.istailcall then "<tail call>"
+                    else "<anonymous>"
+
                 table.insert(stack_names, fn_name)
                 line = if info.short_src
                     line_table = line_tables[info.short_src]
                     if line_table
                         char = line_table[info.currentline]
                         line_num = 1
-                        file = file_cache[info.short_src]
+                        file = file_cache[info.short_src] or info.source
                         for _ in file\sub(1,char)\gmatch("\n") do line_num += 1
                         "#{info.short_src}:#{line_num}"
                     else
@@ -685,6 +690,7 @@ ldb = {
                     "???"
                 err_lines[line] = true
                 table.insert(stack_locations, line)
+                table.insert(stack_sources, info.source)
                 max_filename = math.max(max_filename, #line)
                 max_fn_name = math.max(max_fn_name, #fn_name)
             max_fn_name, max_filename = 0, 0
@@ -698,7 +704,7 @@ ldb = {
                 stack_names, ((i)=> (i == @selected) and Color("black on green") or Color("green bold")),
                 stack_locations, ((i)=> (i == @selected) and Color("black on cyan") or Color("cyan bold"))
         
-        show_src = (filename, line_no)->
+        show_src = (filename, line_no, file_contents=nil)->
             if pads.src
                 if pads.src.filename == filename
                     pads.src\select(line_no)
@@ -716,10 +722,10 @@ ldb = {
                     return
                 else
                     pads.src\erase!
-            file = file_cache[filename]
-            if file
+            file_contents = file_contents or file_cache[filename]
+            if file_contents
                 src_lines = {}
-                for line in (file..'\n')\gmatch("([^\n]*)\n")
+                for line in (file_contents..'\n')\gmatch("([^\n]*)\n")
                     table.insert src_lines, line
                 pads.src = NumberedPad "(S)ource Code", pads.err.height,0,
                     pads.stack.height,pads.stack.x, src_lines, (i)=>
@@ -774,10 +780,10 @@ ldb = {
             pads.vars\select(1)
 
         pads.stack.on_select = (stack_index)=>
-            filename,line_no = pads.stack.columns[2][stack_index]\match("([^:]*):(%d*).*")
+            filename,line_no = pads.stack.columns[2][stack_index]\match("^(.*):(%d*)$")
             --filename, line_no = pads.stack.lines[stack_index]\match("[^|]*| ([^:]*):(%d*).*")
             line_no = tonumber(line_no)
-            show_src(filename, line_no)
+            show_src(filename, line_no, stack_sources[stack_index])
             show_vars(stack_index)
 
         pads.stack\select(1)
@@ -839,10 +845,16 @@ ldb = {
 
                     run_fn, err_msg = load(code, 'user input', 't', stack_env)
                     if not run_fn
+                        stdscr\attrset(Color('red bold'))
                         stdscr\addstr(err_msg)
+                        stdscr\attrset(Color!)
                     else
-                        ret = run_fn!
-                        if ret != nil or print_nil
+                        ok, ret = pcall(run_fn)
+                        if not ok
+                            stdscr\attrset(Color('red bold'))
+                            stdscr\addstr(ret)
+                            stdscr\attrset(Color!)
+                        elseif ret != nil or print_nil
                             value_bits = {'= ', Color('yellow'), unpack(colored_repr(ret, SCREEN_W-2, 4))}
                             numlines = 1
                             for i=1,#value_bits-1,2

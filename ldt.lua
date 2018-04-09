@@ -1018,6 +1018,7 @@ ldb = {
       pads.err._frame:attrset(Color("red"))
       pads.err:refresh()
     end
+    local stack_sources = { }
     local stack_locations = { }
     local err_lines = { }
     do
@@ -1029,7 +1030,14 @@ ldb = {
         if not info then
           break
         end
-        local fn_name = info.name or "<unnamed function>"
+        local fn_name = info.name
+        if not (fn_name) then
+          if info.istailcall then
+            fn_name = "<tail call>"
+          else
+            fn_name = "<anonymous>"
+          end
+        end
         table.insert(stack_names, fn_name)
         local line
         if info.short_src then
@@ -1037,7 +1045,7 @@ ldb = {
           if line_table then
             local char = line_table[info.currentline]
             local line_num = 1
-            local file = file_cache[info.short_src]
+            local file = file_cache[info.short_src] or info.source
             for _ in file:sub(1, char):gmatch("\n") do
               line_num = line_num + 1
             end
@@ -1050,6 +1058,7 @@ ldb = {
         end
         err_lines[line] = true
         table.insert(stack_locations, line)
+        table.insert(stack_sources, info.source)
         max_filename = math.max(max_filename, #line)
         max_fn_name = math.max(max_fn_name, #fn_name)
       end
@@ -1067,7 +1076,10 @@ ldb = {
       end))
     end
     local show_src
-    show_src = function(filename, line_no)
+    show_src = function(filename, line_no, file_contents)
+      if file_contents == nil then
+        file_contents = nil
+      end
       if pads.src then
         if pads.src.filename == filename then
           pads.src:select(line_no)
@@ -1096,10 +1108,10 @@ ldb = {
           pads.src:erase()
         end
       end
-      local file = file_cache[filename]
-      if file then
+      file_contents = file_contents or file_cache[filename]
+      if file_contents then
         local src_lines = { }
-        for line in (file .. '\n'):gmatch("([^\n]*)\n") do
+        for line in (file_contents .. '\n'):gmatch("([^\n]*)\n") do
           table.insert(src_lines, line)
         end
         pads.src = NumberedPad("(S)ource Code", pads.err.height, 0, pads.stack.height, pads.stack.x, src_lines, function(self, i)
@@ -1174,9 +1186,9 @@ ldb = {
       return pads.vars:select(1)
     end
     pads.stack.on_select = function(self, stack_index)
-      local filename, line_no = pads.stack.columns[2][stack_index]:match("([^:]*):(%d*).*")
+      local filename, line_no = pads.stack.columns[2][stack_index]:match("^(.*):(%d*)$")
       line_no = tonumber(line_no)
-      show_src(filename, line_no)
+      show_src(filename, line_no, stack_sources[stack_index])
       return show_vars(stack_index)
     end
     pads.stack:select(1)
@@ -1250,10 +1262,17 @@ ldb = {
         local run_fn
         run_fn, err_msg = load(code, 'user input', 't', stack_env)
         if not run_fn then
+          stdscr:attrset(Color('red bold'))
           stdscr:addstr(err_msg)
+          stdscr:attrset(Color())
         else
-          local ret = run_fn()
-          if ret ~= nil or print_nil then
+          local ret
+          ok, ret = pcall(run_fn)
+          if not ok then
+            stdscr:attrset(Color('red bold'))
+            stdscr:addstr(ret)
+            stdscr:attrset(Color())
+          elseif ret ~= nil or print_nil then
             local value_bits = {
               '= ',
               Color('yellow'),
