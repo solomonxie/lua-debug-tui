@@ -1188,7 +1188,7 @@ ldb = {
     pads.stack.on_select = function(self, stack_index)
       local filename, line_no = pads.stack.columns[2][stack_index]:match("^(.*):(%d*)$")
       line_no = tonumber(line_no)
-      show_src(filename, line_no, stack_sources[stack_index])
+      show_src(filename, line_no, filename and file_cache[filename] or stack_sources[stack_index])
       return show_vars(stack_index)
     end
     pads.stack:select(1)
