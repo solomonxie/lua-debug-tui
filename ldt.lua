@@ -6,14 +6,6 @@ local AUTO = { }
 local PARENT = { }
 local _error = error
 local _assert = assert
-local toggle
-toggle = function(field, bit)
-  if field & bit ~= 0 then
-    return field & ~bit
-  else
-    return field | bit
-  end
-end
 local callstack_range
 callstack_range = function()
   local min, max = 0, -1

@@ -8,12 +8,6 @@ PARENT = {} -- Singleton
 _error = error
 _assert = assert
 
-toggle = (field, bit)->
-    if field & bit != 0
-        field & ~bit
-    else
-        field | bit
-
 -- Return the callstack index of the code that actually caused an error and the max index
 callstack_range = ->
     min, max = 0, -1
