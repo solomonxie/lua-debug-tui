@@ -1,5 +1,6 @@
 local C = require("curses")
 local re = require('re')
+local line_matcher = re.compile('lines<-{| line ("\n" line)* |} line<-{[^\n]*}')
 local ldb
 local AUTO = { }
 local PARENT = { }
@@ -39,7 +40,9 @@ end
 local wrap_text
 wrap_text = function(text, width)
   local lines = { }
-  for line in text:gmatch("[^\n]*") do
+  local _list_0 = line_matcher:match(text)
+  for _index_0 = 1, #_list_0 do
+    local line = _list_0[_index_0]
     while #line > width do
       table.insert(lines, line:sub(1, width))
       line = line:sub(width + 1, -1)
@@ -362,7 +365,6 @@ do
   end
   NumberedPad = _class_0
 end
-local line_matcher = re.compile('lines<-{|(line "\n")* line|} line<-{[^\n]*}')
 local expansions = { }
 local KEY = { }
 local VALUE = { }
@@ -839,7 +841,6 @@ do
       self.full_refresh = function()
         local old_location = self.selected and self.chstr_locations and self.chstr_locations[self.selected]
         self.chstrs, self.chstr_locations = { }, { }
-        line_matcher = re.compile('lines<-{|(line "\n")* line|} line<-{[^\n]*}')
         local W = width - 3
         local lines = make_lines(TOP_LOCATION, self.data, W)
         for i, line in ipairs(lines) do
@@ -931,7 +932,7 @@ local file_cache = setmetatable({ }, {
     if not file then
       return nil
     end
-    local contents = file:read("*a")
+    local contents = file:read("a"):sub(1, -2)
     self[filename] = contents
     return contents
   end
@@ -1110,10 +1111,7 @@ ldb = {
       end
       file_contents = file_contents or file_cache[filename]
       if file_contents then
-        local src_lines = { }
-        for line in (file_contents .. '\n'):gmatch("([^\n]*)\n") do
-          table.insert(src_lines, line)
-        end
+        local src_lines = line_matcher:match(file_contents)
         pads.src = NumberedPad("(S)ource Code", pads.err.height, 0, pads.stack.height, pads.stack.x, src_lines, function(self, i)
           if i == line_no and i == self.selected then
             return Color("yellow on red bold")

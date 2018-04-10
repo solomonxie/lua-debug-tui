@@ -1,5 +1,6 @@
 C = require "curses"
 re = require 're'
+line_matcher = re.compile('lines<-{| line ("\n" line)* |} line<-{[^\n]*}')
 local ldb
 AUTO = {} -- Singleton
 PARENT = {} -- Singleton
@@ -34,7 +35,7 @@ callstack_range = ->
 
 wrap_text = (text, width)->
     lines = {}
-    for line in text\gmatch("[^\n]*")
+    for line in *line_matcher\match(text)
         while #line > width
             table.insert(lines, line\sub(1,width))
             line = line\sub(width+1,-1)
@@ -242,7 +243,6 @@ class NumberedPad extends Pad
         super @label, @y, @x, height, width, unpack(cols)
 
 
-line_matcher = re.compile('lines<-{|(line "\n")* line|} line<-{[^\n]*}')
 expansions = {}
 KEY = {}
 VALUE = {}
@@ -442,7 +442,6 @@ class DataViewer extends Pad
         @full_refresh = ->
             old_location = @selected and @chstr_locations and @chstr_locations[@selected]
             @chstrs, @chstr_locations = {}, {}
-            line_matcher = re.compile('lines<-{|(line "\n")* line|} line<-{[^\n]*}')
             W = width-3
             lines = make_lines(TOP_LOCATION, @data, W)
             for i,line in ipairs(lines)
@@ -585,7 +584,7 @@ if not ok then to_lua = -> nil
 file_cache = setmetatable({}, {__index:(filename)=>
     file = io.open(filename)
     if not file then return nil
-    contents = file\read("*a")
+    contents = file\read("a")\sub(1,-2) -- drop the trailing "\n" that Lua adds for some reason
     @[filename] = contents
     return contents
 })
@@ -724,9 +723,7 @@ ldb = {
                     pads.src\erase!
             file_contents = file_contents or file_cache[filename]
             if file_contents
-                src_lines = {}
-                for line in (file_contents..'\n')\gmatch("([^\n]*)\n")
-                    table.insert src_lines, line
+                src_lines = line_matcher\match(file_contents)
                 pads.src = NumberedPad "(S)ource Code", pads.err.height,0,
                     pads.stack.height,pads.stack.x, src_lines, (i)=>
                         return if i == line_no and i == @selected then Color("yellow on red bold")
