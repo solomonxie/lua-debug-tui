@@ -4,6 +4,9 @@ line_matcher = re.compile('lines<-{| line ("\n" line)* |} line<-{[^\n]*}')
 local ldb
 AUTO = {} -- Singleton
 PARENT = {} -- Singleton
+log = io.open('output.log','w')
+
+-- TODO: add support for upvalues
 
 _error = error
 _assert = assert
@@ -14,15 +17,15 @@ callstack_range = ->
     for i=1,999 do
         info = debug.getinfo(i, 'f')
         if not info
-            min = i-1
+            min = i-0
             break
         if info.func == ldb.run_debugger
-            min = i+2
+            min = i+0
             break
     for i=min,999
         info = debug.getinfo(i, 'f')
         if not info or info.func == ldb.guard
-            max = i-3
+            max = i-0
             break
     return min, max
 
@@ -321,7 +324,9 @@ colored_repr = (x, width, depth=2)->
                 break
         return ret
     else
-        s = tostring(x)
+        ok,s = pcall(tostring,x)
+        if not ok
+            return {"tostring error: "..s, Color("red")}
         return if #s > width
             {s\sub(1,width-3), TYPE_COLORS[type(x)], '...', Color('blue')}
         else
@@ -411,10 +416,12 @@ make_lines = (location, x, width)->
                 lines = make_lines(location, {k,v for k,v in pairs(x)}, width)
                 if getmetatable(x).__tostring
                     s_lines = {}
-                    for line in *line_matcher\match(tostring(x))
+                    ok, s = pcall(tostring, x)
+                    if not ok then s = "tostring error: "..s
+                    for line in *line_matcher\match(s)
                         wrapped = wrap_text(line, width)
                         for i,subline in ipairs(wrapped)
-                            table.insert(s_lines, {:location, subline, Color('yellow')})
+                            table.insert(s_lines, {:location, subline, ok and Color('yellow') or Color('red')})
                     for i=1,#s_lines
                         table.insert(lines, i, s_lines[i])
                 return lines
@@ -649,9 +656,8 @@ ldb = {
             err_msg_lines = wrap_text(err_msg, SCREEN_W - 4)
             for i,line in ipairs(err_msg_lines)
                 err_msg_lines[i] = (" ")\rep(2)..line
-            pads.err = Pad("Error Message", 0,0,AUTO,SCREEN_W, err_msg_lines, (i)=> Color("red bold"))
-            pads.err._frame\attrset(Color("red"))
-            pads.err\refresh!
+            height = math.min(#err_msg_lines, 7)
+            pads.err = Pad("(E)rror Message", 0,0,height,SCREEN_W, err_msg_lines, (i)=> Color("red bold"))
 
         stack_sources = {}
         stack_locations = {}
@@ -756,13 +762,14 @@ ldb = {
             --height = math.min(2+#var_names, SCREEN_H-pads.err.height-pads.stack.height)
             height = SCREEN_H-(pads.err.height+pads.stack.height)
             pads.vars = Pad "(V)ars", var_y,var_x,height,AUTO,var_names, ((i)=> i == @selected and Color('reverse') or Color())
+            log\write("Created var pad.\n")
 
             pads.vars.on_select = (var_index)=>
                 if var_index == nil then return
                 value_x = pads.vars.x+pads.vars.width
                 value_w = SCREEN_W-(value_x)
                 value = stack_env[var_names[var_index]]--values[var_index]
-                type_str = type(value)
+                type_str = tostring(type(value))
                 -- Show single value:
                 pads.values = DataViewer value, "(D)ata [#{type_str}]", var_y,value_x,pads.vars.height,value_w
                 collectgarbage()
@@ -789,7 +796,7 @@ ldb = {
                 selected_pad\set_active(true)
                 selected_pad\refresh!
         
-        select_pad(pads.src)
+        select_pad(pads.stack)
 
         while true
             for _,p in pairs(pads)
@@ -915,6 +922,9 @@ ldb = {
                 when ('d')\byte!
                     select_pad(pads.values) -- (D)ata
                 
+                when ('e')\byte!
+                    select_pad(pads.err) -- (E)rror
+                
                 else
                     selected_pad\keypress(c)
 
@@ -922,8 +932,8 @@ ldb = {
 
     guard: (fn, ...)->
         handler = (err_msg)->
-            xpcall(ldb.run_debugger, err_hand, err_msg)
             print(debug.traceback(err_msg, 2))
+            xpcall(ldb.run_debugger, err_hand, err_msg)
         return xpcall(fn, handler, ...)
 
     breakpoint: ->
@@ -932,15 +942,15 @@ ldb = {
     hijack: ->
         export error, assert
         error = (err_msg)->
-            xpcall(ldb.run_debugger, err_hand, err_msg)
             print(debug.traceback(err_msg, 2))
+            xpcall(ldb.run_debugger, err_hand, err_msg)
             os.exit(2)
 
         assert = (condition, err_msg)->
             if not condition
                 err_msg or= 'Assertion failed!'
-                xpcall(ldb.run_debugger, err_hand, err_msg)
                 print(debug.traceback(err_msg, 2))
+                xpcall(ldb.run_debugger, err_hand, err_msg)
                 os.exit(2)
             return condition
 

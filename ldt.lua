@@ -4,6 +4,7 @@ local line_matcher = re.compile('lines<-{| line ("\n" line)* |} line<-{[^\n]*}')
 local ldb
 local AUTO = { }
 local PARENT = { }
+local log = io.open('output.log', 'w')
 local _error = error
 local _assert = assert
 local callstack_range
@@ -12,18 +13,18 @@ callstack_range = function()
   for i = 1, 999 do
     local info = debug.getinfo(i, 'f')
     if not info then
-      min = i - 1
+      min = i - 0
       break
     end
     if info.func == ldb.run_debugger then
-      min = i + 2
+      min = i + 0
       break
     end
   end
   for i = min, 999 do
     local info = debug.getinfo(i, 'f')
     if not info or info.func == ldb.guard then
-      max = i - 3
+      max = i - 0
       break
     end
   end
@@ -515,7 +516,13 @@ colored_repr = function(x, width, depth)
     end
     return ret
   else
-    local s = tostring(x)
+    local ok, s = pcall(tostring, x)
+    if not ok then
+      return {
+        "tostring error: " .. s,
+        Color("red")
+      }
+    end
     if #s > width then
       return {
         s:sub(1, width - 3),
@@ -672,7 +679,11 @@ make_lines = function(location, x, width)
       end)(), width)
       if getmetatable(x).__tostring then
         local s_lines = { }
-        local _list_0 = line_matcher:match(tostring(x))
+        local ok, s = pcall(tostring, x)
+        if not ok then
+          s = "tostring error: " .. s
+        end
+        local _list_0 = line_matcher:match(s)
         for _index_0 = 1, #_list_0 do
           local line = _list_0[_index_0]
           local wrapped = wrap_text(line, width)
@@ -680,7 +691,7 @@ make_lines = function(location, x, width)
             table.insert(s_lines, {
               location = location,
               subline,
-              Color('yellow')
+              ok and Color('yellow') or Color('red')
             })
           end
         end
@@ -1005,11 +1016,10 @@ ldb = {
       for i, line in ipairs(err_msg_lines) do
         err_msg_lines[i] = (" "):rep(2) .. line
       end
-      pads.err = Pad("Error Message", 0, 0, AUTO, SCREEN_W, err_msg_lines, function(self, i)
+      local height = math.min(#err_msg_lines, 7)
+      pads.err = Pad("(E)rror Message", 0, 0, height, SCREEN_W, err_msg_lines, function(self, i)
         return Color("red bold")
       end)
-      pads.err._frame:attrset(Color("red"))
-      pads.err:refresh()
     end
     local stack_sources = { }
     local stack_locations = { }
@@ -1161,6 +1171,7 @@ ldb = {
       pads.vars = Pad("(V)ars", var_y, var_x, height, AUTO, var_names, (function(self, i)
         return i == self.selected and Color('reverse') or Color()
       end))
+      log:write("Created var pad.\n")
       pads.vars.on_select = function(self, var_index)
         if var_index == nil then
           return 
@@ -1168,7 +1179,7 @@ ldb = {
         local value_x = pads.vars.x + pads.vars.width
         local value_w = SCREEN_W - (value_x)
         local value = stack_env[var_names[var_index]]
-        local type_str = type(value)
+        local type_str = tostring(type(value))
         pads.values = DataViewer(value, "(D)ata [" .. tostring(type_str) .. "]", var_y, value_x, pads.vars.height, value_w)
         collectgarbage()
         return collectgarbage()
@@ -1195,7 +1206,7 @@ ldb = {
         return selected_pad:refresh()
       end
     end
-    select_pad(pads.src)
+    select_pad(pads.stack)
     while true do
       for _, p in pairs(pads) do
         p:refresh()
@@ -1344,6 +1355,8 @@ ldb = {
         select_pad(pads.vars)
       elseif ('d'):byte() == _exp_0 then
         select_pad(pads.values)
+      elseif ('e'):byte() == _exp_0 then
+        select_pad(pads.err)
       else
         selected_pad:keypress(c)
       end
@@ -1353,8 +1366,8 @@ ldb = {
   guard = function(fn, ...)
     local handler
     handler = function(err_msg)
-      xpcall(ldb.run_debugger, err_hand, err_msg)
-      return print(debug.traceback(err_msg, 2))
+      print(debug.traceback(err_msg, 2))
+      return xpcall(ldb.run_debugger, err_hand, err_msg)
     end
     return xpcall(fn, handler, ...)
   end,
@@ -1363,15 +1376,15 @@ ldb = {
   end,
   hijack = function()
     error = function(err_msg)
-      xpcall(ldb.run_debugger, err_hand, err_msg)
       print(debug.traceback(err_msg, 2))
+      xpcall(ldb.run_debugger, err_hand, err_msg)
       return os.exit(2)
     end
     assert = function(condition, err_msg)
       if not condition then
         err_msg = err_msg or 'Assertion failed!'
-        xpcall(ldb.run_debugger, err_hand, err_msg)
         print(debug.traceback(err_msg, 2))
+        xpcall(ldb.run_debugger, err_hand, err_msg)
         os.exit(2)
       end
       return condition
