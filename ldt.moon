@@ -6,7 +6,7 @@ AUTO = {} -- Singleton
 PARENT = {} -- Singleton
 log = io.open('output.log','w')
 
--- TODO: add support for upvalues
+-- TODO: add support for stepping debugger
 
 _error = error
 _assert = assert
@@ -756,12 +756,23 @@ ldb = {
                 table.insert(var_names, tostring(name))
                 table.insert(values, value)
                 stack_env[name] = value
+            num_locals = #var_names
+            info = debug.getinfo(callstack_min+stack_index-1,"uf")
+            for upval=1,info.nups
+                name,value = debug.getupvalue(info.func, upval)
+                if name == "_ENV" then continue
+                table.insert(var_names, tostring(name))
+                table.insert(values, value)
+                stack_env[name] = value
             
             var_y = pads.stack.y + pads.stack.height
             var_x = 0
             --height = math.min(2+#var_names, SCREEN_H-pads.err.height-pads.stack.height)
             height = SCREEN_H-(pads.err.height+pads.stack.height)
-            pads.vars = Pad "(V)ars", var_y,var_x,height,AUTO,var_names, ((i)=> i == @selected and Color('reverse') or Color())
+            pads.vars = Pad "(V)ars", var_y,var_x,height,AUTO,var_names, (i)=>
+                if i == @selected then Color('reverse')
+                elseif i <= num_locals then Color()
+                else Color("black bold")
             log\write("Created var pad.\n")
 
             pads.vars.on_select = (var_index)=>

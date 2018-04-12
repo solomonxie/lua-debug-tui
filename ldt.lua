@@ -1165,12 +1165,37 @@ ldb = {
         table.insert(values, value)
         stack_env[name] = value
       end
+      local num_locals = #var_names
+      local info = debug.getinfo(callstack_min + stack_index - 1, "uf")
+      for upval = 1, info.nups do
+        local _continue_0 = false
+        repeat
+          local name, value = debug.getupvalue(info.func, upval)
+          if name == "_ENV" then
+            _continue_0 = true
+            break
+          end
+          table.insert(var_names, tostring(name))
+          table.insert(values, value)
+          stack_env[name] = value
+          _continue_0 = true
+        until true
+        if not _continue_0 then
+          break
+        end
+      end
       local var_y = pads.stack.y + pads.stack.height
       local var_x = 0
       local height = SCREEN_H - (pads.err.height + pads.stack.height)
-      pads.vars = Pad("(V)ars", var_y, var_x, height, AUTO, var_names, (function(self, i)
-        return i == self.selected and Color('reverse') or Color()
-      end))
+      pads.vars = Pad("(V)ars", var_y, var_x, height, AUTO, var_names, function(self, i)
+        if i == self.selected then
+          return Color('reverse')
+        elseif i <= num_locals then
+          return Color()
+        else
+          return Color("black bold")
+        end
+      end)
       log:write("Created var pad.\n")
       pads.vars.on_select = function(self, var_index)
         if var_index == nil then
