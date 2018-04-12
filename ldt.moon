@@ -17,15 +17,15 @@ callstack_range = ->
     for i=1,999 do
         info = debug.getinfo(i, 'f')
         if not info
-            min = i-0
+            min = i-1
             break
         if info.func == ldb.run_debugger
-            min = i+0
+            min = i+2
             break
     for i=min,999
         info = debug.getinfo(i, 'f')
         if not info or info.func == ldb.guard
-            max = i-0
+            max = i-3
             break
     return min, max
 

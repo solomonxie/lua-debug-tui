@@ -13,18 +13,18 @@ callstack_range = function()
   for i = 1, 999 do
     local info = debug.getinfo(i, 'f')
     if not info then
-      min = i - 0
+      min = i - 1
       break
     end
     if info.func == ldb.run_debugger then
-      min = i + 0
+      min = i + 2
       break
     end
   end
   for i = min, 999 do
     local info = debug.getinfo(i, 'f')
     if not info or info.func == ldb.guard then
-      max = i - 0
+      max = i - 3
       break
     end
   end
