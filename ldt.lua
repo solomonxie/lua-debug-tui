@@ -4,7 +4,6 @@ local line_matcher = re.compile('lines<-{| line ("\n" line)* |} line<-{[^\n]*}')
 local ldb
 local AUTO = { }
 local PARENT = { }
-local log = io.open('output.log', 'w')
 local _error = error
 local _assert = assert
 local callstack_range
@@ -1196,7 +1195,6 @@ ldb = {
           return Color("black bold")
         end
       end)
-      log:write("Created var pad.\n")
       pads.vars.on_select = function(self, var_index)
         if var_index == nil then
           return 

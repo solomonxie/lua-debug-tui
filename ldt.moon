@@ -4,7 +4,6 @@ line_matcher = re.compile('lines<-{| line ("\n" line)* |} line<-{[^\n]*}')
 local ldb
 AUTO = {} -- Singleton
 PARENT = {} -- Singleton
-log = io.open('output.log','w')
 
 -- TODO: add support for stepping debugger
 
@@ -773,7 +772,6 @@ ldb = {
                 if i == @selected then Color('reverse')
                 elseif i <= num_locals then Color()
                 else Color("black bold")
-            log\write("Created var pad.\n")
 
             pads.vars.on_select = (var_index)=>
                 if var_index == nil then return
