@@ -1013,14 +1013,21 @@ ldb = {
       for i, line in ipairs(err_msg_lines) do
         err_msg_lines[i] = (" "):rep(2) .. line
       end
-      local height = math.min(#err_msg_lines, 7)
+      local height = math.min(#err_msg_lines + 2, 7)
       pads.err = Pad("(E)rror Message", 0, 0, height, SCREEN_W, err_msg_lines, function(self, i)
         return Color("red bold")
       end)
     end
+    local err_lines = { }
     local stack_sources = { }
     local stack_locations = { }
-    local err_lines = { }
+    local watch_exprs = setmetatable({ }, {
+      __index = function(self, k)
+        local t = { }
+        self[k] = t
+        return t
+      end
+    })
     do
       local stack_names = { }
       local max_filename, max_fn_name = 0, 0
@@ -1145,8 +1152,8 @@ ldb = {
       if pads.vars then
         pads.vars:erase()
       end
-      if pads.values then
-        pads.values:erase()
+      if pads.data then
+        pads.data:erase()
       end
       local callstack_min, _ = callstack_range()
       local var_names, values = { }, { }
@@ -1181,21 +1188,44 @@ ldb = {
           break
         end
       end
+      local _list_0 = watch_exprs[stack_index]
+      for _index_0 = 1, #_list_0 do
+        local _continue_0 = false
+        repeat
+          local watch = _list_0[_index_0]
+          if stack_env[watch.expr] ~= nil then
+            _continue_0 = true
+            break
+          end
+          table.insert(var_names, watch.expr)
+          table.insert(values, watch.value)
+          stack_env[watch.expr] = watch.value
+          _continue_0 = true
+        until true
+        if not _continue_0 then
+          break
+        end
+      end
       local var_y = pads.stack.y + pads.stack.height
       local var_x = 0
       local height = SCREEN_H - (pads.err.height + pads.stack.height)
       pads.vars = Pad("(V)ars", var_y, var_x, height, AUTO, var_names, function(self, i)
-        if i == self.selected then
-          return Color('reverse')
-        elseif i <= num_locals then
-          return Color()
+        local color
+        if i <= num_locals then
+          color = Color()
+        elseif i <= num_locals + info.nups - 1 then
+          color = Color("blue")
         else
-          return Color("black bold")
+          color = Color("green")
         end
+        if i == self.selected then
+          color = color + C.A_REVERSE
+        end
+        return color
       end)
       pads.vars.keypress = function(self, key)
-        if key == ('l'):byte() then
-          return select_pad(pads.values)
+        if key == ('l'):byte() or key == C.KEY_RIGHT then
+          return select_pad(pads.data)
         else
           return Pad.keypress(self, key)
         end
@@ -1208,9 +1238,9 @@ ldb = {
         local value_w = SCREEN_W - (value_x)
         local value = stack_env[var_names[var_index]]
         local type_str = tostring(type(value))
-        pads.values = DataViewer(value, "(D)ata [" .. tostring(type_str) .. "]", var_y, value_x, pads.vars.height, value_w)
-        pads.values.keypress = function(self, key)
-          if key == ('h'):byte() and self.selected == 1 then
+        pads.data = DataViewer(value, "(D)ata [" .. tostring(type_str) .. "]", var_y, value_x, pads.vars.height, value_w)
+        pads.data.keypress = function(self, key)
+          if (key == ('h'):byte() or key == C.KEY_LEFT) and self.selected == 1 then
             return select_pad(pads.vars)
           else
             return DataViewer.keypress(self, key)
@@ -1252,11 +1282,13 @@ ldb = {
       if (':'):byte() == _exp_0 or ('>'):byte() == _exp_0 or ('?'):byte() == _exp_0 then
         C.echo(true)
         local print_nil = false
+        local user_input
         local code = ''
         if c == ('?'):byte() then
           stdscr:mvaddstr(SCREEN_H - 1, 0, "? " .. (' '):rep(SCREEN_W - 1))
           stdscr:move(SCREEN_H - 1, 2)
-          code = 'return ' .. stdscr:getstr()
+          user_input = stdscr:getstr()
+          code = 'return ' .. user_input
           print_nil = true
         elseif c == (':'):byte() or c == ('>'):byte() then
           local numlines = 1
@@ -1343,6 +1375,33 @@ ldb = {
             end
             stdscr:attrset(Color())
             stdscr:mvaddstr(y, x, (' '):rep(SCREEN_W - x))
+            if c == ("?"):byte() and ret ~= nil then
+              local replacing = false
+              local watch_index = nil
+              local watches = watch_exprs[pads.stack.selected]
+              for i, w in ipairs(watches) do
+                if w.expr == user_input then
+                  w.value = ret
+                  watch_index = i
+                  break
+                end
+              end
+              if not (watch_index) then
+                table.insert(watches, {
+                  expr = user_input,
+                  value = ret
+                })
+                watch_index = #watches
+              end
+              show_vars(pads.stack.selected)
+              for i, s in ipairs(pads.vars.columns[1]) do
+                if s == user_input then
+                  pads.vars:select(i)
+                  break
+                end
+              end
+              select_pad(pads.data)
+            end
           else
             local numlines = 0
             for nl in output:gmatch('\n') do
@@ -1388,9 +1447,22 @@ ldb = {
       elseif ('v'):byte() == _exp_0 then
         select_pad(pads.vars)
       elseif ('d'):byte() == _exp_0 then
-        select_pad(pads.values)
+        select_pad(pads.data)
       elseif ('e'):byte() == _exp_0 then
         select_pad(pads.err)
+      elseif C.KEY_DC == _exp_0 or C.KEY_DL == _exp_0 or C.KEY_BACKSPACE == _exp_0 then
+        if selected_pad == pads.vars then
+          local watches = watch_exprs[pads.stack.selected]
+          local expr = pads.vars.columns[1][pads.vars.selected]
+          for i, w in ipairs(watches) do
+            if w.expr == expr then
+              table.remove(watches, i)
+              show_vars(pads.stack.selected)
+              select_pad(pads.vars)
+              break
+            end
+          end
+        end
       else
         selected_pad:keypress(c)
       end
