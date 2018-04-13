@@ -6,6 +6,7 @@ AUTO = {} -- Singleton
 PARENT = {} -- Singleton
 
 -- TODO: add support for stepping debugger
+-- TODO: add vim-style search functionality via "/"
 
 _error = error
 _assert = assert
@@ -653,12 +654,18 @@ ldb = {
             err_msg_lines = wrap_text(err_msg, SCREEN_W - 4)
             for i,line in ipairs(err_msg_lines)
                 err_msg_lines[i] = (" ")\rep(2)..line
-            height = math.min(#err_msg_lines, 7)
+            height = math.min(#err_msg_lines+2, 7)
             pads.err = Pad("(E)rror Message", 0,0,height,SCREEN_W, err_msg_lines, (i)=> Color("red bold"))
 
+        err_lines = {}
         stack_sources = {}
         stack_locations = {}
-        err_lines = {}
+        -- Map from stack index -> expr -> value
+        watch_exprs = setmetatable({}, {__index:(k)=>
+            t = {}
+            self[k] = t
+            return t
+        })
         do -- Stack pad
             stack_names = {}
             max_filename, max_fn_name = 0, 0
@@ -742,8 +749,8 @@ ldb = {
         show_vars = (stack_index)->
             if pads.vars
                 pads.vars\erase!
-            if pads.values
-                pads.values\erase!
+            if pads.data
+                pads.data\erase!
             callstack_min, _ = callstack_range!
             var_names, values = {}, {}
             stack_env = setmetatable({}, {__index:_G})
@@ -761,18 +768,26 @@ ldb = {
                 table.insert(var_names, tostring(name))
                 table.insert(values, value)
                 stack_env[name] = value
+            for watch in *watch_exprs[stack_index]
+                continue if stack_env[watch.expr] != nil
+                table.insert(var_names, watch.expr)
+                table.insert(values, watch.value)
+                stack_env[watch.expr] = watch.value
             
             var_y = pads.stack.y + pads.stack.height
             var_x = 0
             --height = math.min(2+#var_names, SCREEN_H-pads.err.height-pads.stack.height)
             height = SCREEN_H-(pads.err.height+pads.stack.height)
             pads.vars = Pad "(V)ars", var_y,var_x,height,AUTO,var_names, (i)=>
-                if i == @selected then Color('reverse')
-                elseif i <= num_locals then Color()
-                else Color("black bold")
+                color = if i <= num_locals then Color()
+                elseif i <= num_locals + info.nups - 1 then Color("blue")
+                else Color("green")
+                if i == @selected then color += C.A_REVERSE
+                return color
+
             pads.vars.keypress = (key)=>
-                if key == ('l')\byte!
-                    select_pad(pads.values)
+                if key == ('l')\byte! or key == C.KEY_RIGHT
+                    select_pad(pads.data)
                 else Pad.keypress(self, key)
 
             pads.vars.on_select = (var_index)=>
@@ -782,9 +797,9 @@ ldb = {
                 value = stack_env[var_names[var_index]]--values[var_index]
                 type_str = tostring(type(value))
                 -- Show single value:
-                pads.values = DataViewer value, "(D)ata [#{type_str}]", var_y,value_x,pads.vars.height,value_w
-                pads.values.keypress = (key)=>
-                    if key == ('h')\byte! and @selected == 1
+                pads.data = DataViewer value, "(D)ata [#{type_str}]", var_y,value_x,pads.vars.height,value_w
+                pads.data.keypress = (key)=>
+                    if (key == ('h')\byte! or key == C.KEY_LEFT) and @selected == 1
                         select_pad(pads.vars)
                     else DataViewer.keypress(self, key)
                 collectgarbage()
@@ -824,11 +839,13 @@ ldb = {
                 when (':')\byte!, ('>')\byte!, ('?')\byte!
                     C.echo(true)
                     print_nil = false
+                    local user_input
                     code = ''
                     if c == ('?')\byte!
                         stdscr\mvaddstr(SCREEN_H-1, 0, "? "..(' ')\rep(SCREEN_W-1))
                         stdscr\move(SCREEN_H-1, 2)
-                        code = 'return '..stdscr\getstr!
+                        user_input = stdscr\getstr!
+                        code = 'return '..user_input
                         print_nil = true
                     elseif c == (':')\byte! or c == ('>')\byte!
                         numlines = 1
@@ -889,6 +906,26 @@ ldb = {
                                     stdscr\mvaddstr(y, x, line)
                             stdscr\attrset(Color!)
                             stdscr\mvaddstr(y,x,(' ')\rep(SCREEN_W-x))
+
+                            if c == ("?")\byte! and ret != nil
+                                replacing = false
+                                watch_index = nil
+                                watches = watch_exprs[pads.stack.selected]
+                                for i,w in ipairs watches
+                                    if w.expr == user_input
+                                        w.value = ret
+                                        watch_index = i
+                                        break
+                                unless watch_index
+                                    table.insert watches, {expr:user_input, value:ret}
+                                    watch_index = #watches
+                                show_vars(pads.stack.selected)
+                                --pads.vars\select(#pads.vars.columns[1] - #watches + watch_index)
+                                for i,s in ipairs(pads.vars.columns[1])
+                                    if s == user_input
+                                        pads.vars\select(i)
+                                        break
+                                select_pad(pads.data)
                         else
                             numlines = 0
                             for nl in output\gmatch('\n') do numlines += 1
@@ -935,10 +972,21 @@ ldb = {
                     select_pad(pads.vars) -- (V)ars
 
                 when ('d')\byte!
-                    select_pad(pads.values) -- (D)ata
+                    select_pad(pads.data) -- (D)ata
                 
                 when ('e')\byte!
                     select_pad(pads.err) -- (E)rror
+                
+                when C.KEY_DC, C.KEY_DL, C.KEY_BACKSPACE
+                    if selected_pad == pads.vars
+                        watches = watch_exprs[pads.stack.selected]
+                        expr = pads.vars.columns[1][pads.vars.selected]
+                        for i,w in ipairs watches
+                            if w.expr == expr
+                                table.remove(watches, i)
+                                show_vars(pads.stack.selected)
+                                select_pad(pads.vars)
+                                break
                 
                 else
                     selected_pad\keypress(c)
