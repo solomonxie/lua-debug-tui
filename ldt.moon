@@ -240,9 +240,7 @@ class NumberedPad extends Pad
 
 
 expansions = {}
-KEY = {}
-VALUE = {}
-TOP_LOCATION = {}
+TOP_LOCATION, KEY, VALUE = {}, {}, {}
 locations = {}
 Location = (old_loc, kind, key)->
     if old_loc == nil
@@ -438,7 +436,6 @@ class DataViewer extends Pad
         @active_frame = Color("yellow bold")
         @inactive_frame = Color("blue dim")
 
-        @expansions = {}
         @full_refresh = ->
             old_location = @selected and @chstr_locations and @chstr_locations[@selected]
             @chstrs, @chstr_locations = {}, {}
@@ -608,6 +605,7 @@ err_hand = (err)->
 
 ldb = {
     run_debugger: (err_msg)->
+        local select_pad
         err_msg or= ''
         if type(err_msg) != 'string' then err_msg = tostring(err_msg)
         stdscr = C.initscr!
@@ -772,6 +770,10 @@ ldb = {
                 if i == @selected then Color('reverse')
                 elseif i <= num_locals then Color()
                 else Color("black bold")
+            pads.vars.keypress = (key)=>
+                if key == ('l')\byte!
+                    select_pad(pads.values)
+                else Pad.keypress(self, key)
 
             pads.vars.on_select = (var_index)=>
                 if var_index == nil then return
@@ -781,6 +783,10 @@ ldb = {
                 type_str = tostring(type(value))
                 -- Show single value:
                 pads.values = DataViewer value, "(D)ata [#{type_str}]", var_y,value_x,pads.vars.height,value_w
+                pads.values.keypress = (key)=>
+                    if key == ('h')\byte! and @selected == 1
+                        select_pad(pads.vars)
+                    else DataViewer.keypress(self, key)
                 collectgarbage()
                 collectgarbage()
 

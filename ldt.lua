@@ -358,9 +358,7 @@ do
   NumberedPad = _class_0
 end
 local expansions = { }
-local KEY = { }
-local VALUE = { }
-local TOP_LOCATION = { }
+local TOP_LOCATION, KEY, VALUE = { }, { }, { }
 local locations = { }
 local Location
 Location = function(old_loc, kind, key)
@@ -839,7 +837,6 @@ do
       self.selected = nil
       self.active_frame = Color("yellow bold")
       self.inactive_frame = Color("blue dim")
-      self.expansions = { }
       self.full_refresh = function()
         local old_location = self.selected and self.chstr_locations and self.chstr_locations[self.selected]
         self.chstrs, self.chstr_locations = { }, { }
@@ -962,6 +959,7 @@ err_hand = function(err)
 end
 ldb = {
   run_debugger = function(err_msg)
+    local select_pad
     err_msg = err_msg or ''
     if type(err_msg) ~= 'string' then
       err_msg = tostring(err_msg)
@@ -1195,6 +1193,13 @@ ldb = {
           return Color("black bold")
         end
       end)
+      pads.vars.keypress = function(self, key)
+        if key == ('l'):byte() then
+          return select_pad(pads.values)
+        else
+          return Pad.keypress(self, key)
+        end
+      end
       pads.vars.on_select = function(self, var_index)
         if var_index == nil then
           return 
@@ -1204,6 +1209,13 @@ ldb = {
         local value = stack_env[var_names[var_index]]
         local type_str = tostring(type(value))
         pads.values = DataViewer(value, "(D)ata [" .. tostring(type_str) .. "]", var_y, value_x, pads.vars.height, value_w)
+        pads.values.keypress = function(self, key)
+          if key == ('h'):byte() and self.selected == 1 then
+            return select_pad(pads.vars)
+          else
+            return DataViewer.keypress(self, key)
+          end
+        end
         collectgarbage()
         return collectgarbage()
       end
@@ -1217,7 +1229,6 @@ ldb = {
     end
     pads.stack:select(1)
     local selected_pad = nil
-    local select_pad
     select_pad = function(pad)
       if selected_pad ~= pad then
         if selected_pad then
