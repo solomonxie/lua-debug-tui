@@ -38,8 +38,11 @@ wrap_text = function(text, width)
     while #line > width do
       table.insert(lines, line:sub(1, width))
       line = line:sub(width + 1, -1)
+      if #line == 0 then
+        line = nil
+      end
     end
-    if #line > 0 then
+    if line then
       table.insert(lines, line)
     end
   end
@@ -1074,7 +1077,7 @@ ldb = {
         max_fn_name = math.max(max_fn_name, #stack_names[i])
         max_filename = math.max(max_filename, #stack_locations[i])
       end
-      local stack_h = math.max(#stack_names + 2, math.floor(2 / 3 * SCREEN_H))
+      local stack_h = math.floor(SCREEN_H * .6)
       local stack_w = math.min(max_fn_name + 3 + max_filename, math.floor(1 / 3 * SCREEN_W))
       pads.stack = Pad("(C)allstack", pads.err.height, SCREEN_W - stack_w, stack_h, stack_w, stack_names, (function(self, i)
         return (i == self.selected) and Color("black on green") or Color("green bold")
@@ -1266,8 +1269,10 @@ ldb = {
           selected_pad:refresh()
         end
         selected_pad = pad
-        selected_pad:set_active(true)
-        return selected_pad:refresh()
+        if selected_pad then
+          selected_pad:set_active(true)
+          return selected_pad:refresh()
+        end
       end
     end
     select_pad(pads.stack)
@@ -1464,7 +1469,9 @@ ldb = {
           end
         end
       else
-        selected_pad:keypress(c)
+        if selected_pad then
+          selected_pad:keypress(c)
+        end
       end
     end
     return C.endwin()
