@@ -1,7 +1,7 @@
 package = "ldt"
 version = "scm-1"
 source = {
-   url = "https://github.com/solomonxie/lua-debug-tui"
+   url = "git@github.com:solomonxie/lua-debug-tui.git"
 }
 description = {
    summary = "This is a text-based user interface command line debugging utility for Lua and Moonscript.",
