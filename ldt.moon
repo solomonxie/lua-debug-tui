@@ -106,7 +106,7 @@ class Pad
             @chstrs[i] = C.new_chstr(@_width)
             @setup_chstr(i)
         @dirty = true
-    
+
     configure_size: (@height, @width)=>
         @_height = math.max(#@columns[1], 1)
         if @height == AUTO
@@ -137,20 +137,20 @@ class Pad
                 x += 1
         @_pad\mvaddchstr(i-1,0,chstr)
         @dirty = true
-    
+
     set_active: (active)=>
         return if active == @active
         @active = active
         @_frame\attrset(active and @active_frame or @inactive_frame)
         @dirty = true
-    
+
     select: (i)=>
         if #@columns[1] == 0 then i = nil
         if i == @selected then return @selected
         old_y, old_x = @scroll_y, @scroll_x
         if i != nil
             i = math.max(1, math.min(#@columns[1], i))
-        
+
         old_selected,@selected = @selected,i
 
         if old_selected
@@ -177,7 +177,7 @@ class Pad
 
         if @on_select then @on_select(@selected)
         return @selected
-    
+
     scroll: (dy,dx)=>
         old_y, old_x = @scroll_y, @scroll_x
         if @selected != nil
@@ -187,7 +187,7 @@ class Pad
         @scroll_x = math.max(1, math.min(@_width-(@width-2-1), @scroll_x+(dx or 0)))
         if @scroll_y != old_y or @scroll_x != old_x
             @dirty = true
-    
+
     refresh: (force=false)=>
         return if not force and not @dirty
         @_frame\border(C.ACS_VLINE, C.ACS_VLINE,
@@ -223,12 +223,12 @@ class Pad
                 @scroll(0,-1)
             when ("H")\byte!
                 @scroll(0,-10)
-    
+
     erase: =>
         @dirty = true
         @_frame\erase!
         @_frame\refresh!
-    
+
     __gc: =>
         @_frame\close!
         @_pad\close!
@@ -481,7 +481,7 @@ class DataViewer extends Pad
         @_pad = C.newpad(@height-2, @width-2)
         @_pad\scrollok(true)
         @set_active false
-        
+
         @full_refresh!
         @select 1
 
@@ -496,7 +496,7 @@ class DataViewer extends Pad
         old_y, old_x = @scroll_y, @scroll_x
         if i != nil
             i = math.max(1, math.min(#@chstrs, i))
-        
+
         old_selected,@selected = @selected,i
 
         if old_selected and @chstrs[old_selected]
@@ -708,7 +708,7 @@ ldb = {
             pads.stack = Pad "(C)allstack",pads.err.height,SCREEN_W-stack_w,stack_h,stack_w,
                 stack_names, ((i)=> (i == @selected) and Color("black on green") or Color("green bold")),
                 stack_locations, ((i)=> (i == @selected) and Color("black on cyan") or Color("cyan bold"))
-        
+
         show_src = (filename, line_no, file_contents=nil)->
             if pads.src
                 if pads.src.filename == filename
@@ -746,7 +746,7 @@ ldb = {
                 table.insert(lines, s)
                 pads.src = Pad "(S)ource Code", pads.err.height,0,pads.stack.height,pads.stack.x,lines, ->Color("red")
             pads.src.filename = filename
-        
+
         local stack_env
         show_vars = (stack_index)->
             if pads.vars
@@ -775,7 +775,7 @@ ldb = {
                 table.insert(var_names, watch.expr)
                 table.insert(values, watch.value)
                 stack_env[watch.expr] = watch.value
-            
+
             var_y = pads.stack.y + pads.stack.height
             var_x = 0
             --height = math.min(2+#var_names, SCREEN_H-pads.err.height-pads.stack.height)
@@ -828,7 +828,7 @@ ldb = {
                 if selected_pad
                     selected_pad\set_active(true)
                     selected_pad\refresh!
-        
+
         select_pad(pads.stack)
 
         while true
@@ -952,7 +952,7 @@ ldb = {
                     stdscr\clear!
                     stdscr\refresh!
                     for _,pad in pairs(pads) do pad\refresh(true)
-                
+
                 when C.KEY_RESIZE
                     SCREEN_H, SCREEN_W = stdscr\getmaxyx!
                     stdscr\clear!
@@ -976,10 +976,10 @@ ldb = {
 
                 when ('d')\byte!
                     select_pad(pads.data) -- (D)ata
-                
+
                 when ('e')\byte!
                     select_pad(pads.err) -- (E)rror
-                
+
                 when C.KEY_DC, C.KEY_DL, C.KEY_BACKSPACE
                     if selected_pad == pads.vars
                         watches = watch_exprs[pads.stack.selected]
@@ -990,7 +990,7 @@ ldb = {
                                 show_vars(pads.stack.selected)
                                 select_pad(pads.vars)
                                 break
-                
+
                 else
                     if selected_pad
                         selected_pad\keypress(c)
