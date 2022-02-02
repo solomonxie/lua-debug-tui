@@ -15,7 +15,7 @@ Moonscript.]],
    license = "MIT"
 }
 dependencies = {
-   "lua ~> 5.4"
+   "lua >= 5.3"
 }
 build = {
    type = "builtin",
